@@ -13,7 +13,7 @@ from pathlib import Path
 
 import gradio as gr
 
-from lyrics_tool.backends import BACKENDS, BackendError, OllamaBackend, make_backend
+from lyrics_tool.backends import BACKENDS, GEMINI_DEFAULT_MODEL, BackendError, OllamaBackend, make_backend
 from lyrics_tool.cache import Cache, default_title
 from lyrics_tool.cleanup import clean_lyrics, read_lyrics_file
 from lyrics_tool.core import (
@@ -29,12 +29,12 @@ FALLBACK_CHOICES = [("사용 안 함", "none")] + [(v, k) for k, v in BACKENDS.i
 
 ENGINE_HINTS = {
     "ollama": ("비우면 OLLAMA_MODEL (기본 qwen3:8b)", "Ollama 주소 (기본 http://localhost:11434)", False),
-    "gemini": ("비우면 GEMINI_MODEL (기본 gemini-2.5-flash)", "", True),
+    "gemini": (f"비우면 GEMINI_MODEL (기본 {GEMINI_DEFAULT_MODEL}, 빠르게: gemini-3.5-flash-lite)", "", True),
     "openai": ("비우면 OPENAI_MODEL", "Base URL (예: https://api.groq.com/openai/v1)", True),
 }
 
 DEFAULT_SETTINGS = {
-    "engine": "ollama", "model": "", "base_url": "", "batch": 8,
+    "engine": "ollama", "model": "", "base_url": "", "batch": 8, "retries": 3,
     "mode": MODE_SOURCE, "unit": UNIT_LINE, "font": 16, "numbers": True, "hide": False,
     "reading": True, "dict": DICT_NAVER,
     "fb_engine": "none", "fb_model": "", "auto_clean": True,
@@ -62,17 +62,18 @@ def get_cache() -> Cache:
     return CACHE
 
 
-def make_translator(engine, model, api_key, base_url, batch) -> Translator:
-    backend = make_backend(engine, (model or "").strip(), (api_key or "").strip(), (base_url or "").strip())
+def make_translator(engine, model, api_key, base_url, batch, retries=3) -> Translator:
+    backend = make_backend(engine, (model or "").strip(), (api_key or "").strip(), (base_url or "").strip(),
+                           int(retries))
     return Translator(backend, batch_size=int(batch), cache=get_cache())
 
 
-def make_fallback(fb_engine, fb_model, engine, api_key, base_url, batch) -> Translator | None:
+def make_fallback(fb_engine, fb_model, engine, api_key, base_url, batch, retries=3) -> Translator | None:
     """보조 엔진. 주 엔진과 종류가 같으면 화면의 키·주소를, 다르면 .env 값을 쓴다."""
     if not fb_engine or fb_engine == "none":
         return None
     same = fb_engine == engine
-    return make_translator(fb_engine, fb_model, api_key if same else "", base_url if same else "", batch)
+    return make_translator(fb_engine, fb_model, api_key if same else "", base_url if same else "", batch, retries)
 
 
 def _view(mode, unit, font, numbers, hide, reading, dictionary):
@@ -142,7 +143,7 @@ def load_file(path):
 # ---------------------------------------------------------------- 번역 (점진 표시)
 
 
-def run_translate(lyrics, title, lang, auto_clean, engine, model, api_key, base_url, batch,
+def run_translate(lyrics, title, lang, auto_clean, engine, model, api_key, base_url, batch, retries,
                   fb_engine, fb_model, force, *view):
     if not lyrics or not lyrics.strip():
         raise gr.Error("가사를 입력해 주세요.")
@@ -153,7 +154,7 @@ def run_translate(lyrics, title, lang, auto_clean, engine, model, api_key, base_
         if report:
             notes.append("가사 정리: " + ", ".join(report))
 
-    t = make_translator(engine, model, api_key, base_url, batch)
+    t = make_translator(engine, model, api_key, base_url, batch, retries)
     doc = t.prepare(lyrics, lang, use_cache=not force)
     doc.title = (title or "").strip() or default_title(lyrics)
     get_cache().save_history(doc.title, lyrics, doc.lang, engine, t.backend.model, int(batch))
@@ -169,7 +170,7 @@ def run_translate(lyrics, title, lang, auto_clean, engine, model, api_key, base_
         for doc in t.run(doc):
             yield gr.update(), to_html(doc, mode, unit, opts), _status(doc, t, "번역 중…"), doc, None, gr.update()
 
-        fb = make_fallback(fb_engine, fb_model, engine, api_key, base_url, batch)
+        fb = make_fallback(fb_engine, fb_model, engine, api_key, base_url, batch, retries)
         failed = sum(1 for r in doc.lines() if r.error)
         if fb and failed:
             for doc in fb.retry_failed(doc):
@@ -216,11 +217,11 @@ def _edit_fields(doc: Doc | None, line_no):
     return info, chunks_to_text(r.chunks), r.ko, sent
 
 
-def retranslate_line(doc, line_no, engine, model, api_key, base_url, batch, *view):
+def retranslate_line(doc, line_no, engine, model, api_key, base_url, batch, retries, *view):
     if doc is None or not line_no:
         raise gr.Error("먼저 번역을 실행하고 줄 번호를 입력하세요.")
     mode, unit, opts = _view(*view)
-    t = make_translator(engine, model, api_key, base_url, batch)
+    t = make_translator(engine, model, api_key, base_url, batch, retries)
     try:
         t.retranslate(doc, int(line_no))
     except KeyError as e:
@@ -243,11 +244,11 @@ def save_line(doc, line_no, chunk_text, ko, sent_ko, *view):
     return to_html(doc, mode, unit, opts), doc, _export(doc, mode, unit, opts)
 
 
-def retry_all(doc, engine, model, api_key, base_url, batch, *view):
+def retry_all(doc, engine, model, api_key, base_url, batch, retries, *view):
     if doc is None:
         raise gr.Error("먼저 번역을 실행하세요.")
     mode, unit, opts = _view(*view)
-    t = make_translator(engine, model, api_key, base_url, batch)
+    t = make_translator(engine, model, api_key, base_url, batch, retries)
     try:
         for doc in t.retry_failed(doc):
             yield to_html(doc, mode, unit, opts), _status(doc, t, "실패한 줄 재시도 중…"), doc, None
@@ -320,16 +321,16 @@ def restore_settings(saved):
     key_u, url_u = _engine_visibility(s["engine"])
     return (s["engine"], gr.update(value=s["model"], info=ENGINE_HINTS[s["engine"]][0]), key_u,
             gr.update(value=s["base_url"], visible=url_u["visible"], placeholder=url_u["placeholder"]),
-            s["batch"], s["mode"], s["unit"], s["font"], s["numbers"], s["hide"], s["reading"],
+            s["batch"], s["retries"], s["mode"], s["unit"], s["font"], s["numbers"], s["hide"], s["reading"],
             s["dict"] if s["dict"] in DICTS else DICT_NAVER, s["fb_engine"], s["fb_model"], s["auto_clean"],
             gr.update(choices=_history_choices()))
 
 
-def save_settings(engine, model, base_url, batch, mode, unit, font, numbers, hide, reading, dictionary,
+def save_settings(engine, model, base_url, batch, retries, mode, unit, font, numbers, hide, reading, dictionary,
                   fb_engine, fb_model, auto_clean):
     # API 키는 브라우저에 저장하지 않는다 (.env 사용 권장)
-    return dict(engine=engine, model=model or "", base_url=base_url or "", batch=batch, mode=mode, unit=unit,
-                font=font, numbers=numbers, hide=hide, reading=reading, dict=dictionary,
+    return dict(engine=engine, model=model or "", base_url=base_url or "", batch=batch, retries=retries,
+                mode=mode, unit=unit, font=font, numbers=numbers, hide=hide, reading=reading, dict=dictionary,
                 fb_engine=fb_engine, fb_model=fb_model or "", auto_clean=auto_clean)
 
 
@@ -378,6 +379,9 @@ def build_ui() -> gr.Blocks:
                     batch = gr.Slider(1, 20, value=8, step=1, label="한 번에 보낼 최대 줄 수",
                                       info="연이 이보다 길면 나눠 보냅니다. 작을수록 거부가 줄고, 클수록 빠릅니다. "
                                            "값을 바꾸면 기존 캐시와 구간이 달라집니다.")
+                    retries = gr.Slider(0, 10, value=3, step=1, label="요청 실패 시 재시도 횟수",
+                                        info="연결 끊김·시간 초과·한도 초과(429)·서버 과부하(5xx)일 때 기다렸다가 "
+                                             "다시 요청합니다. 서버가 알려 준 대기 시간, 없으면 2·4·8…초.")
                     gr.Markdown("**보조 엔진** — 주 엔진에서 실패한 줄만 자동으로 다시 시도합니다. 키·주소는 .env 값을 씁니다.")
                     with gr.Row():
                         fb_engine = gr.Dropdown(FALLBACK_CHOICES, value="none", label="보조 엔진")
@@ -422,7 +426,7 @@ def build_ui() -> gr.Blocks:
                     retry_btn = gr.Button("실패한 줄 모두 다시 번역")
                 files = gr.File(label="내보내기 (Markdown · 인쇄용 HTML · JSON)", file_count="multiple")
 
-        E = [engine, model, api_key, base_url, batch]
+        E = [engine, model, api_key, base_url, batch, retries]
         V = [mode, unit, font, numbers, hide, reading, dict_dd]
         edit_outputs = [edit_info, chunk_box, ko_box, sent_box]
         tr_inputs = [lyrics, title, lang, auto_clean, *E, fb_engine, fb_model, force, *V]
@@ -461,9 +465,9 @@ def build_ui() -> gr.Blocks:
         hist_del.click(delete_history, hist_dd, hist_dd)
 
         # 설정 기억 (브라우저 저장소)
-        remembered = [engine, model, base_url, batch, *V, fb_engine, fb_model, auto_clean]
+        remembered = [engine, model, base_url, batch, retries, *V, fb_engine, fb_model, auto_clean]
         demo.load(restore_settings, settings,
-                  [engine, model, api_key, base_url, batch, *V, fb_engine, fb_model, auto_clean, hist_dd])
+                  [engine, model, api_key, base_url, batch, retries, *V, fb_engine, fb_model, auto_clean, hist_dd])
         gr.on([c.change for c in remembered], save_settings, remembered, settings)
 
         # Ctrl/Cmd + Enter 로 번역
@@ -479,5 +483,8 @@ def build_ui() -> gr.Blocks:
 
 
 if __name__ == "__main__":
+    import logging
+
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
     _load_dotenv()
     build_ui().launch(server_name=os.environ.get("HOST", "127.0.0.1"))

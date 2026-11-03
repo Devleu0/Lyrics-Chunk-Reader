@@ -4,14 +4,26 @@
 - OllamaBackend   : 로컬 LLM (무료, 거부 거의 없음)
 - GeminiBackend   : Google AI Studio 무료 티어
 - OpenAICompatBackend : Groq / OpenRouter / LM Studio 등 OpenAI 호환 API
+
+일시적인 오류(연결 끊김·시간 초과·429·5xx)는 `retries`번까지 기다렸다가 다시 요청한다.
+서버가 기다릴 시간을 알려 주면(Retry-After, Gemini retryDelay) 그만큼, 아니면 2·4·8…초(최대 30초).
 """
 
 from __future__ import annotations
 
+import logging
 import os
+import random
+import re
+import time
 from dataclasses import dataclass, field
 
 import requests
+
+log = logging.getLogger(__name__)
+
+RETRY_STATUS = {429, 500, 502, 503, 504}
+MAX_WAIT = 60  # 이보다 오래 기다리라고 하면(일일 한도 소진 등) 재시도하지 않는다
 
 
 class BackendError(RuntimeError):
@@ -34,6 +46,7 @@ class Backend:
     model: str
     timeout: int = 180
     temperature: float = 0.2
+    retries: int = 3  # 일시적 오류 시 추가 시도 횟수
 
     name: str = field(default="base", init=False)
 
@@ -41,15 +54,32 @@ class Backend:
         raise NotImplementedError
 
     def _post(self, url: str, **kwargs) -> dict:
-        try:
-            resp = requests.post(url, timeout=self.timeout, **kwargs)
-        except requests.ConnectionError as e:
-            raise BackendError(f"{self.name} 서버에 연결할 수 없습니다: {url}") from e
-        except requests.Timeout as e:
-            raise BackendError(f"{self.name} 응답 시간 초과 ({self.timeout}s)") from e
-        if resp.status_code >= 400:
-            raise BackendError(f"{self.name} 오류 {resp.status_code}: {resp.text[:300]}")
-        return resp.json()
+        for attempt in range(self.retries + 1):
+            last = attempt == self.retries
+            try:
+                resp = requests.post(url, timeout=self.timeout, **kwargs)
+            except (requests.ConnectionError, requests.Timeout) as e:
+                if isinstance(e, requests.Timeout):
+                    msg = f"{self.name} 응답 시간 초과 ({self.timeout}s)"
+                else:
+                    msg = f"{self.name} 서버에 연결할 수 없습니다: {url}"
+                if last:
+                    raise BackendError(msg + _tries(attempt)) from e
+                self._wait(attempt, None, msg)
+                continue
+            if resp.status_code < 400:
+                return resp.json()
+            msg = f"{self.name} 오류 {resp.status_code}: {_error_detail(resp)}"
+            hint = _retry_after(resp)
+            if resp.status_code not in RETRY_STATUS or last or (hint or 0) > MAX_WAIT:
+                raise BackendError(msg + _tries(attempt))
+            self._wait(attempt, hint, msg)
+        raise AssertionError("unreachable")  # pragma: no cover
+
+    def _wait(self, attempt: int, hint: float | None, reason: str) -> None:
+        delay = hint if hint is not None else min(2 * 2**attempt, 30) + random.uniform(0, 1)
+        log.warning("%s — %.0f초 후 다시 시도 (%d/%d)", reason.splitlines()[0], delay, attempt + 1, self.retries)
+        time.sleep(delay)
 
     def _get(self, url: str, **kwargs) -> dict:
         try:
@@ -75,6 +105,31 @@ class Backend:
             hint = f" — 터미널에서 `ollama pull {self.model}`" if self.name == "Ollama" else ""
             return CheckResult(False, f"연결됨. 하지만 모델 `{self.model}`을 찾을 수 없습니다{hint}.", models)
         return CheckResult(True, f"{self.name} 연결됨 · 모델 `{self.model}` 사용 가능", models)
+
+
+def _tries(attempt: int) -> str:
+    return f" ({attempt + 1}회 시도)" if attempt else ""
+
+
+def _error_detail(resp: requests.Response) -> str:
+    """오류 본문에서 사람이 읽을 메시지만 꺼낸다 (Gemini·OpenAI 형식: {"error": {"message": ...}})."""
+    try:
+        err = resp.json().get("error")
+        msg = err.get("message") if isinstance(err, dict) else err
+        if isinstance(msg, str) and msg:
+            return msg[:300]
+    except (ValueError, AttributeError):
+        pass
+    return resp.text[:300]
+
+
+def _retry_after(resp: requests.Response) -> float | None:
+    """서버가 알려 준 대기 시간(초). Retry-After 헤더 또는 Gemini 오류 본문의 retryDelay("21s")."""
+    header = resp.headers.get("Retry-After", "")
+    if header.strip().isdigit():
+        return float(header)
+    m = re.search(r'"retryDelay":\s*"(\d+(?:\.\d+)?)s"', resp.text)
+    return float(m.group(1)) if m else None
 
 
 def _has_model(models: list[str], model: str) -> bool:
@@ -214,23 +269,33 @@ class OpenAICompatBackend(Backend):
 BACKENDS = {"ollama": "Ollama (로컬)", "gemini": "Gemini (무료 API)", "openai": "OpenAI 호환 API"}
 
 
-def make_backend(kind: str, model: str = "", api_key: str = "", base_url: str = "") -> Backend:
-    """UI/환경변수 값으로 백엔드를 만든다. 빈 값은 환경변수 기본값을 쓴다."""
-    env = os.environ.get
+GEMINI_DEFAULT_MODEL = "gemini-3.6-flash"
+
+
+def make_backend(kind: str, model: str = "", api_key: str = "", base_url: str = "", retries: int = 3) -> Backend:
+    """UI/환경변수 값으로 백엔드를 만든다. 빈 값은 환경변수, 그것도 비었으면 기본값을 쓴다."""
+
+    def env(key: str, default: str = "") -> str:
+        return os.environ.get(key, "").strip() or default  # .env의 `KEY=` 처럼 빈 값도 기본값으로
+
+    retries = max(0, int(retries))
     if kind == "ollama":
         return OllamaBackend(
             model=model or env("OLLAMA_MODEL", "qwen3:8b"),
             host=base_url or env("OLLAMA_HOST", "http://localhost:11434"),
+            retries=retries,
         )
     if kind == "gemini":
         return GeminiBackend(
-            model=model or env("GEMINI_MODEL", "gemini-2.5-flash"),
-            api_key=api_key or env("GEMINI_API_KEY", ""),
+            model=model or env("GEMINI_MODEL", GEMINI_DEFAULT_MODEL),
+            api_key=api_key or env("GEMINI_API_KEY"),
+            retries=retries,
         )
     if kind == "openai":
         return OpenAICompatBackend(
             model=model or env("OPENAI_MODEL", "llama-3.3-70b-versatile"),
             base_url=base_url or env("OPENAI_BASE_URL", "https://api.groq.com/openai/v1"),
-            api_key=api_key or env("OPENAI_API_KEY", ""),
+            api_key=api_key or env("OPENAI_API_KEY"),
+            retries=retries,
         )
     raise ValueError(f"알 수 없는 백엔드: {kind}")
