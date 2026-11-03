@@ -1,89 +1,37 @@
-# 가사 직독직해 번역 툴
+# 🎧 Lyrics Chunk Reader
 
-일본어·중국어·영어 가사를 **의미 단위로 끊어 한국어로 직역**하는 언어 학습용 로컬 웹 툴입니다.
-로컬 LLM(Ollama)을 기본으로 쓰고, 필요하면 무료 API(Gemini, Groq 등)로 바꿔 쓸 수 있습니다.
+**English** | [한국어](README.ko.md)
 
-## 화면 구성
+A local web app for language learners that **splits song lyrics into meaning chunks, glosses each chunk, and gives a literal translation in the target language's word order**.
+It runs on a local LLM (Ollama) or a free API (Gemini, Groq, …), and the interface is available in English and Korean.
 
-입력은 붙여넣기뿐이니 작게, **뷰어가 화면의 중심**이 되도록 나눴습니다.
+![Viewer — Japanese lyrics glossed in English](docs/images/viewer-en.png)
 
-- **가사 입력**(맨 위): 붙여넣고 번역하면 접히고, 접힌 제목에 곡 이름·줄 수가 보입니다. 새 가사는 눌러서 다시 펼칩니다.
-- **뷰어 툴바**: 보기 방식·직역 단위·발음·한국어 가리기를 바로 전환합니다. 스크롤해도 화면 위에 붙어 있습니다.
-- **왼쪽 사이드바 (설정)**: 엔진, 표시(글자 크기·줄 번호·사전 링크), 최근 번역, 내보내기.
-- **오른쪽 사이드바 (줄 수정)**: 뷰어의 **줄 번호를 누르면** 그 줄이 불러와지며 열립니다.
+> The lyrics in the screenshots are original sample lines written for this demo.
 
-## 보기 방식
+## Features
 
-한 번 번역하면 세 방식을 버튼으로 바로 전환합니다(재번역 없음). **둘 다**는 끊어읽기 카드 아래에 한국어 어순 직역을 함께 보여줍니다.
+- **Chunked reading + literal translation**: glosses each chunk in the original word order, then translates each line — or each multi-line sentence — literally.
+- **Major languages**: pick the source and target from English, Japanese, Chinese, Korean, Spanish, French, German, Portuguese, Italian, Russian, Vietnamese, Thai and Indonesian. The source language is auto-detected.
+- **Pronunciation**: furigana for Japanese, pinyin for Chinese (local analyzers, no LLM).
+- **Dictionary links**: click a chunk to open Naver Dictionary or Jisho · MDBG · Wiktionary.
+- **Lyrics clean-up**: strips `[Chorus]` labels, LRC timestamps, credits and lyrics-site leftovers; opens .txt/.lrc files with encoding detection.
+- **Line editing**: click a line number to retranslate just that line or fix it by hand. Repeated choruses update together.
+- **Cache & history**: a song you have translated opens instantly next time.
+- **Export**: Markdown (for review), printable HTML (save as PDF), JSON.
+- **Works on your phone** over the same Wi-Fi.
 
-| 원문 어순 (끊어읽기) | 한국어 어순 (직역) |
-|---|---|
-| `I've been waiting / for you / all night`<br>`나는 기다려 왔어 / 너를 / 밤새` | `I've been waiting for you all night`<br>`→ 나는 밤새 너를 기다려 왔어` |
+## Quick start
 
-한국어 직역이 보이는 방식에서는 **직역 단위**를 고를 수 있습니다.
-
-- **줄 단위**: 줄마다 직역
-- **문장 단위**: 여러 줄에 걸친 문장을 묶어 한 번에 직역 (예: `I've been waiting for you` / `all night long` → 한 문장)
-
-**표시 옵션**: 글자 크기, 줄 번호 숨기기(설정 → 표시), **한국어 가리기**(툴바)(흐리게 가렸다가 누르거나 마우스를 올리면 보임 — 셀프 테스트용).
-
-**읽기 보조** (LLM 호출 없음)
-
-- **발음 표기**(툴바, 기본 켬): 일본어는 한자 위에 후리가나(`君(きみ)を待(ま)って` — 오쿠리가나 제외), 중국어는 한자마다 성조 병음. 번역 전 대기 중인 줄에도 바로 붙습니다. Markdown·인쇄용 HTML에도 들어갑니다.
-  - 일본어는 형태소 분석기(fugashi + unidic-lite), 중국어는 pypinyin을 씁니다. 다음자·고유명사는 가끔 틀릴 수 있습니다.
-- **청크 사전 링크**(설정 → 표시): 끊어읽기 카드의 원문을 누르면 새 탭에서 사전을 엽니다. 네이버 사전(한국어 뜻) 또는 Jisho·MDBG·Wiktionary 중 선택, 끌 수도 있습니다. 누를 때만 그 조각이 사전 사이트로 전송됩니다.
-
-결과는 Markdown(복습용), 인쇄용 HTML(브라우저에서 열어 인쇄·PDF 저장), JSON(원본 데이터)으로 내보낼 수 있습니다(설정 → 내보내기).
-
-## 사용 흐름
-
-1. 가사를 붙여넣거나 **파일 불러오기**(.txt/.lrc)로 열고 **번역** (Ctrl/Cmd+Enter). 연(빈 줄로 구분)이 하나씩 끝날 때마다 결과가 채워집니다.
-   - **번역 전 가사 자동 정리**(기본 켬)가 `[Chorus]`·`【サビ】` 같은 구간 표시를 연 구분으로 바꾸고, LRC 타임스탬프, `作词：` 같은 크레딧, 가사 사이트 잔여물, 섞여 있는 한국어 번역 줄을 지웁니다. 정리 내역은 상태 줄에 나옵니다.
-   - 빈 줄이 없는 LRC는 노래 시간 간격이 긴 곳에 연 구분을 넣습니다.
-2. 오래 걸리면 **중단**. 끝난 부분은 남고, 다시 번역을 누르면 캐시 덕분에 나머지만 번역합니다.
-3. 마음에 안 드는 줄은 뷰어에서 **줄 번호를 눌러** 오른쪽 **줄 수정** 패널을 엽니다(툴바의 ✎ 줄 수정 또는 번호 직접 입력도 가능).
-   - **이 줄 다시 번역**: 현재 엔진 설정으로 그 줄(여러 줄 문장이면 문장 전체)만 다시 번역. 다른 엔진·모델로 바꿔서 시도할 수 있습니다.
-   - 청크(`원문 | 한국어`)와 직역을 직접 고쳐 **수정 저장**
-   - **실패한 줄 모두 다시 번역**
-4. 고친 내용과 번역 결과는 캐시에 저장되어 같은 가사를 다시 열면 바로 나옵니다.
-5. **최근 번역**에서 지난 곡을 고르면 그때의 엔진 설정으로 캐시에서 즉시 복원합니다.
-
-엔진·모델·보기 설정은 브라우저에 기억됩니다(API 키는 저장하지 않으니 `.env`에 넣으세요).
-
-## 엔진 설정 팁
-
-- **연결 확인**: 번역 전에 서버 연결·API 키·모델 존재를 확인하고, 쓸 수 있는 모델을 목록에 채웁니다.
-- **보조 엔진**: 주 엔진에서 실패한 줄만 자동으로 다른 엔진(예: Ollama → Gemini)으로 다시 시도합니다. 보조 엔진의 키·주소는 `.env` 값을 씁니다.
-- **요청 실패 시 재시도 횟수**(기본 3, 0~10): 연결 끊김·시간 초과·한도 초과(429)·서버 과부하(5xx)이면 기다렸다가 다시 요청합니다. 서버가 대기 시간을 알려 주면 그만큼, 아니면 2·4·8…초(최대 30초)를 기다립니다. 1분 넘게 기다리라는 응답(일일 한도 소진 등)과 잘못된 요청(400·401 등)은 바로 오류로 표시합니다. 대기 내역은 앱을 실행한 터미널에 나옵니다.
-
-## 폰에서 쓰기
-
-PC에서 `HOST=0.0.0.0 python app.py`로 실행하고, 같은 와이파이의 폰 브라우저에서 `http://<PC의 IP>:7860`을 엽니다. Windows PowerShell에서는 `$env:HOST = "0.0.0.0"`을 먼저 실행한 뒤 `.venv\Scripts\python.exe app.py`를 실행하세요. 화면은 폰 폭에 맞게 줄바꿈됩니다.
-같은 네트워크의 누구나 접속할 수 있으니 공용 와이파이에서는 쓰지 마세요.
-
-## 캐시
-
-- 위치: `~/.lyrics-jikdok/cache.db` (환경변수 `LYRICS_CACHE`로 변경)
-- 키: 엔진·모델·언어·연 원문. 엔진이나 모델을 바꾸면 새로 번역합니다.
-- 반복되는 연(후렴)은 한 번만 번역하고, 수정하면 반복되는 곳에 함께 반영됩니다.
-- 실패한 줄이 있는 연은 저장하지 않아 다음에 다시 시도됩니다.
-- "한 번에 보낼 최대 줄 수"를 바꾸면 긴 연의 나뉘는 방식이 달라져 캐시가 적중하지 않을 수 있습니다.
-- 새로 번역하려면 "캐시 무시하고 새로 번역", 전부 지우려면 엔진 설정의 "캐시 비우기".
-
-## 설치
+Requires Python 3.10+.
 
 ### Windows (PowerShell)
-
-가상환경을 만들고 의존성을 설치합니다. 가상환경 활성화 없이도 아래 명령으로 앱을 실행할 수 있습니다.
 
 ```powershell
 py -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 .\.venv\Scripts\python.exe app.py
 ```
-
-브라우저에서 http://127.0.0.1:7860 을 엽니다. 일본어 발음 사전(unidic-lite) 설치에 약 250MB가 필요합니다.
-설치 후에는 프로젝트 폴더의 `start.bat`을 더블클릭해 실행할 수 있습니다. Ollama 서버 연결과 웹 앱 준비를 확인한 후 브라우저를 엽니다. `qwen3:8b` 모델이 없으면 최초 실행 시 약 5.2GB를 다운로드합니다.
 
 ### macOS / Linux
 
@@ -94,54 +42,95 @@ python -m pip install -r requirements.txt
 python app.py
 ```
 
-API 키 등을 환경변수로 관리하려면 `.env.example`을 `.env`로 복사한 뒤 필요한 값만 채우세요. `.env` 파일은 선택 사항입니다.
+Open http://127.0.0.1:7860. The install needs about 250 MB, mostly for the Japanese pronunciation dictionary (unidic-lite).
 
-### 엔진 1 — Ollama (로컬, 기본값, 추천)
+For API keys or a default engine, copy `.env.example` to `.env` and fill in what you need (optional). On Windows, after installing you can double-click `start.bat`: it starts the Ollama server and the app, then opens the browser (it downloads `qwen3:8b`, about 5.2 GB, on first run if missing).
 
-1. https://ollama.com 에서 설치
-2. 모델 받기: `ollama pull qwen3:8b`
-   - 중국어·일본어에 강한 Qwen 계열을 권장합니다. VRAM/RAM이 부족하면 `qwen3:4b`, 여유가 있으면 `qwen3:14b`·`gemma3:12b`
-3. 가사가 PC 밖으로 나가지 않고, 거부도 거의 없습니다.
+## Translation engines
 
-### 엔진 2 — Gemini 무료 API
+| Engine | Notes | Setup |
+|---|---|---|
+| **Ollama** (local) | Lyrics never leave your PC; almost no refusals. Speed depends on your GPU | Install from [ollama.com](https://ollama.com), then `ollama pull qwen3:8b` |
+| **Gemini** (free API) | Fast and accurate. Default `gemini-3.5-flash-lite`; `gemini-3.6-flash` for more natural chunks | Get a key at [Google AI Studio](https://aistudio.google.com) → `GEMINI_API_KEY` in `.env` |
+| **OpenAI-compatible** | Groq, OpenRouter, LM Studio, or anything with `/chat/completions` | `OPENAI_BASE_URL`, `OPENAI_API_KEY`, `OPENAI_MODEL` |
 
-[Google AI Studio](https://aistudio.google.com)에서 키를 발급받아 `.env`의 `GEMINI_API_KEY`에 넣거나 화면에서 입력합니다.
-저작물 재현 필터(RECITATION)에 걸리면 툴이 자동으로 줄 단위로 쪼개 다시 요청합니다.
+- Set the default engine with `LYRICS_BACKEND` (ollama | gemini | openai) in `.env`, or change it under **Settings → Engine** in the left sidebar.
+- **Which engine?** On a laptop GPU with 4 GB of VRAM, `qwen3:8b` spilled onto the CPU and took about 40 s per 4-line stanza, while Gemini took 2–7 s. With less than 8 GB of VRAM, use Gemini as the main engine and Ollama as the **fallback engine** (it retries only the failed lines).
+- Free-tier limits and model names change often. **Test connection** checks your key and model and loads the list of available models.
 
-### 엔진 3 — OpenAI 호환 API
+## How to use
 
-Groq, OpenRouter, LM Studio 등 `/chat/completions`를 지원하는 서비스면 됩니다. `OPENAI_BASE_URL`, `OPENAI_API_KEY`, `OPENAI_MODEL`을 설정하세요.
+1. Paste lyrics or open a **file** (.txt/.lrc), choose the source language (auto-detect by default) and the target (→ English, …), then press **Translate** (Ctrl/Cmd+Enter).
+   - The input panel collapses when translation starts, and the viewer fills in stanza by stanza.
+   - Press **Stop** if it takes too long. Finished parts are kept, and translating again only sends the rest thanks to the cache.
+2. Switch views from the viewer toolbar (no retranslation).
 
-기본 모델은 `gemini-3.5-flash-lite`입니다(4줄 연 약 2초). 끊어읽기가 조금 잘게 쪼개지는 편이라, 더 자연스러운 의미 단위가 필요하면 `gemini-3.6-flash`(5~7초)를 모델 칸에 넣으세요. `gemini-2.5-flash`는 지원 종료 예정입니다.
+   | Source order (chunks) | Target order (literal) |
+   |---|---|
+   | `君に / 会いたくて`<br>`to you / wanting to see` | `君に会いたくて`<br>`→ wanting to see you` |
 
-> **어떤 엔진을 쓸까?** VRAM 4GB 노트북(RTX 3050)에서 `qwen3:8b`는 일부가 CPU로 넘어가 4줄 연 하나에 약 40초가 걸렸고 번역도 부정확했습니다. 같은 연을 Gemini는 2~7초에 정확히 번역했습니다(`gemini-3.5-flash-lite` 약 2초, `gemini-3.6-flash` 5~7초). VRAM이 8GB 미만이면 Gemini를 주 엔진으로, Ollama를 보조 엔진(가사가 밖으로 나가지 않고 저작물 필터가 없음)으로 쓰는 것을 권장합니다.
+   - **Both**: shows the literal translation under the chunk cards.
+   - **By line / By sentence**: translate sentences that span several lines in one piece.
+   - **Pronunciation**, **Hide translation** (blurred until you tap it — for self-testing).
+3. If a line looks wrong, **click its line number** to open the **Edit line** panel on the right. Retranslate it, or fix it by hand as `source | gloss`.
 
-> 무료 API의 사용량 한도와 모델 이름은 수시로 바뀝니다. 오류가 나면 각 서비스의 최신 모델명을 확인하세요.
+   ![Edit line panel](docs/images/edit-en.png)
 
-## 거부·실패를 줄이는 장치
+4. Download results as Markdown, printable HTML or JSON under **Settings → Export**. Reopen past songs from **Settings → Recent**.
 
-- 프롬프트를 "번역"이 아닌 **학습용 문법 주석** 작업으로 정의하고, 원문 재작성은 금지합니다.
-- 연 단위(최대 8줄)로 보내고, 앞뒤 연의 몇 줄을 **문맥**으로 함께 줍니다.
-- 연 전체가 거부되면 **반씩 나눠** 다시 보내 거부되는 줄만 고립시키고, 남은 줄은 **1줄 단위로 재시도**합니다(작은 단위가 필터를 덜 탑니다).
-- 조각(chunks)을 이었을 때 원문과 80% 이상 일치하지 않으면 버리고 재시도합니다(환각 방지).
-- 그래도 실패한 줄은 ⚠ 표시와 이유를 보여줍니다. 줄 수정 패널에서 다른 엔진으로 다시 번역하거나 직접 입력하세요.
-- 반씩 나누는 과정에서 한 문장이 쪼개졌으면, 거부 줄을 뺀 채 그 문장을 한 번 더 묶어 요청해 문장 직역을 되살립니다.
+Switch the interface language (English / 한국어) with the buttons at the top right. It starts in your browser's language. Engine, model and view settings are remembered in the browser (API keys are never saved, so put them in `.env`).
 
-## 구조
+## Settings tips
+
+- **Fallback engine**: automatically retries only the lines the main engine failed, with another engine. It uses keys/addresses from `.env`.
+- **Retries on request failure** (default 3): on dropped connections, timeouts, rate limits (429) or overload (5xx), waits as long as the server asks (otherwise 2·4·8… s, up to 30 s) and retries. A request to wait more than a minute, or a bad request such as 400/401, is shown as an error right away.
+- **Max lines per request** (default 8): longer stanzas are split. Smaller means fewer refusals, larger means faster.
+- **Dictionary links on chunks** (Settings → Display): Naver covers Japanese, Chinese, English and Korean; other languages go to Wiktionary. A chunk is sent to the dictionary site only when you click it.
+
+## Use it on your phone
+
+Run `HOST=0.0.0.0 python app.py` on your PC (PowerShell: `$env:HOST = "0.0.0.0"` then `.venv\Scripts\python.exe app.py`) and open `http://<your PC's IP>:7860` in your phone's browser on the same Wi-Fi. Anyone on the network can connect, so don't do this on public Wi-Fi.
+
+<img src="docs/images/mobile-en.png" alt="Phone view" width="300">
+
+## Cache
+
+- Location: `~/.lyrics-jikdok/cache.db` (override with `LYRICS_CACHE`).
+- Key: engine, model, source language, target language and stanza text. Change any of them and it translates again.
+- Repeated stanzas (choruses) are translated once, and edits apply to every repeat. Stanzas with failed lines aren't cached, so they are retried next time.
+- Use **Ignore cache** to translate fresh, or **Settings → Engine → Clear cache** to wipe it.
+
+## How it reduces refusals and failures
+
+- The prompt frames the job as **grammar annotation for a learner**, not translation, and forbids rewriting the text.
+- Lyrics are sent stanza by stanza, with a few lines of the neighbouring stanzas as **context**.
+- If a whole stanza is refused, it is **split in half** and resent to isolate the refused lines; the rest are retried **one line at a time**. Sentences cut apart along the way are regrouped (without the refused lines) to recover the sentence translation.
+- Responses whose chunks don't rebuild at least 80% of the original line are discarded (hallucination guard).
+- Gemini's recitation filter (RECITATION) is usually passed by this splitting. Lines that still fail show ⚠ with the reason — retranslate them with another engine in the Edit line panel.
+
+## Project layout
 
 ```
-app.py                  Gradio 웹 UI
+app.py                  Gradio web UI (all strings in lyrics_tool/i18n.py)
 lyrics_tool/
-  backends.py           Ollama / Gemini / OpenAI 호환 엔진
-  core.py               연 단위 구간, 프롬프트, 재시도, 문장 묶음, 재번역·수정
-  cache.py              SQLite 번역 캐시 + 최근 번역 목록
-  cleanup.py            가사 자동 정리, TXT/LRC 인코딩 추정 읽기
-  reading.py            발음 표기(후리가나·병음), 사전 링크
-  render.py             보기 방식·직역 단위별 HTML·Markdown 렌더링
-tests/                  가짜 엔진 기반 테스트 (python -m pytest)
-docs/learning-features-report.md   학습 편의 기능 정리 보고서
+  backends.py           Ollama / Gemini / OpenAI-compatible engines, retries
+  core.py               stanza segments, prompt, split-and-retry, sentence groups, retranslate/edit
+  langs.py              supported languages, source-language detection
+  i18n.py               UI and message strings (English, Korean)
+  cache.py              SQLite translation cache + recent list
+  cleanup.py            lyrics clean-up, TXT/LRC reading with encoding detection
+  reading.py            pronunciation (furigana, pinyin), dictionary links
+  render.py             HTML/Markdown rendering per view mode and unit
+tests/                  tests with a fake engine (python -m pytest)
+start.bat               Windows launcher (checks Ollama → starts the app → opens the browser)
 ```
 
-## 참고
+Tests: `python -m pip install pytest`, then `python -m pytest`.
 
-입력한 가사는 개인 학습용으로만 사용하세요. 번역 결과를 공개 배포할 때는 원저작물의 권리를 확인해야 합니다.
+## Notes
+
+Use the lyrics you enter for personal study only, and check the rights to the original work before publishing any translation. API engines send the lyrics to that service.
+
+## License
+
+[MIT](LICENSE) © 2026 Devleu
