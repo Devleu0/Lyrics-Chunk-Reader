@@ -131,6 +131,7 @@ class Doc:
     sources: list[str]  # 0번 = 1번 줄
     segments: list[Segment]
     results: dict[str, SegResult] = field(default_factory=dict)
+    title: str = ""
 
     # ---- 조회
     def locate(self, line_no: int) -> tuple[Segment, int]:
