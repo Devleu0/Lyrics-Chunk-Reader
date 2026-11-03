@@ -17,7 +17,7 @@ It runs on a local LLM (Ollama) or a free API (Gemini, Groq, …), and the inter
 - **Dictionary links**: click a chunk to open Naver Dictionary or Jisho · MDBG · Wiktionary.
 - **Lyrics clean-up**: strips `[Chorus]` labels, LRC timestamps, credits and lyrics-site leftovers; opens .txt/.lrc files with encoding detection.
 - **Line editing**: click a line number to retranslate just that line or fix it by hand. Repeated choruses update together.
-- **Cache & history**: a song you have translated opens instantly next time.
+- **History**: every fully translated song is kept in a list on the main screen — click it to reopen instantly, without translating again.
 - **Export**: Markdown (for review), printable HTML (save as PDF), JSON.
 - **Works on your phone** over the same Wi-Fi.
 
@@ -76,7 +76,7 @@ For API keys or a default engine, copy `.env.example` to `.env` and fill in what
 
    ![Edit line panel](docs/images/edit-en.png)
 
-4. Download results as Markdown, printable HTML or JSON under **Settings → Export**. Reopen past songs from **Settings → Recent**.
+4. Download results as Markdown, printable HTML or JSON under **Settings → Export**. Reopen past songs from **📚 Recent translations** below the lyrics box (see [History](#history)).
 
 Switch the interface language (English / 한국어) with the buttons at the top right. It starts in your browser's language. Engine, model and view settings are remembered in the browser (API keys are never saved, so put them in `.env`).
 
@@ -93,9 +93,19 @@ Run `HOST=0.0.0.0 python app.py` on your PC (PowerShell: `$env:HOST = "0.0.0.0"`
 
 <img src="docs/images/mobile-en.png" alt="Phone view" width="300">
 
+## History
+
+- The **📚 Recent translations** list under the lyrics box loads by itself when the page opens and refreshes after each translation.
+- Click a row to open that song **as saved** — no engine is called and nothing is translated again. Press **Translate** if you do want a fresh translation.
+- Only songs with **every line translated** are saved. Stopped translations or songs with failed lines are not; once you fix the failed lines (Edit line), the song is saved.
+- Storage: one JSON file per song in the `history/` folder of the project (override with `LYRICS_HISTORY_DIR`). The same lyrics in the same target language overwrite the earlier file. You can open, back up or delete the files directly; **🗑 Delete the open song from history** removes the open one.
+![Recent translations list](docs/images/history-en.png)
+
+- History from earlier versions (kept in the cache DB) is moved into `history/` on first start, but only for songs whose results are complete.
+
 ## Cache
 
-- Location: `~/.lyrics-jikdok/cache.db` (override with `LYRICS_CACHE`).
+- Location: `~/.lyrics-jikdok/cache.db` (override with `LYRICS_CACHE`). It stores translated stanzas so repeated stanzas and retries don't call the engine again; your song list lives in `history/` (above).
 - Key: engine, model, source language, target language and stanza text. Change any of them and it translates again.
 - Repeated stanzas (choruses) are translated once, and edits apply to every repeat. Stanzas with failed lines aren't cached, so they are retried next time.
 - Use **Ignore cache** to translate fresh, or **Settings → Engine → Clear cache** to wipe it.
@@ -117,7 +127,8 @@ lyrics_tool/
   core.py               stanza segments, prompt, split-and-retry, sentence groups, retranslate/edit
   langs.py              supported languages, source-language detection
   i18n.py               UI and message strings (English, Korean)
-  cache.py              SQLite translation cache + recent list
+  cache.py              SQLite translation cache (per stanza)
+  history.py            translation history, one JSON file per song in history/
   cleanup.py            lyrics clean-up, TXT/LRC reading with encoding detection
   reading.py            pronunciation (furigana, pinyin), dictionary links
   render.py             HTML/Markdown rendering per view mode and unit
