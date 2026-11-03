@@ -57,7 +57,11 @@ def clean_lyrics(text: str) -> tuple[str, list[str]]:
     """가사를 정리하고 (정리된 가사, 변경 내역)을 반환한다."""
     report: list[str] = []
     raw = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
-    had_blank = any(not l.strip() for l in raw)
+    # 내용 줄 사이에 빈 줄이 있는지 (파일 끝 줄바꿈은 제외)
+    body = [l for l in raw if l.strip() and not _LRC_META.match(l)]
+    first = next((k for k, l in enumerate(raw) if l.strip()), 0)
+    last = max((k for k, l in enumerate(raw) if l.strip()), default=0)
+    had_blank = len(body) > 0 and any(not l.strip() for l in raw[first : last + 1])
 
     lines: list[str] = []
     times: list[float | None] = []

@@ -31,7 +31,7 @@ def test_lrc_timestamps_meta_and_stanza_breaks():
         ["[ti:Song]", "[ar:Artist]"]
         + [f"[00:{10 + 3 * k:02d}.00]line {k}" for k in range(4)]
         + [f"[00:{40 + 3 * k:02d}.50]next {k}" for k in range(4)]
-    )
+    ) + "\n"  # 파일 끝 줄바꿈이 있어도 연 구분을 넣어야 함
     text, report = clean_lyrics(raw)
     assert text == "line 0\nline 1\nline 2\nline 3\n\nnext 0\nnext 1\nnext 2\nnext 3"
     assert any("타임스탬프 8줄" in r for r in report)
