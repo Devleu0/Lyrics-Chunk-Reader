@@ -23,6 +23,13 @@ class RefusalError(BackendError):
 
 
 @dataclass
+class CheckResult:
+    ok: bool
+    message: str
+    models: list[str] = field(default_factory=list)
+
+
+@dataclass
 class Backend:
     model: str
     timeout: int = 180
@@ -43,6 +50,38 @@ class Backend:
         if resp.status_code >= 400:
             raise BackendError(f"{self.name} 오류 {resp.status_code}: {resp.text[:300]}")
         return resp.json()
+
+    def _get(self, url: str, **kwargs) -> dict:
+        try:
+            resp = requests.get(url, timeout=10, **kwargs)
+        except (requests.ConnectionError, requests.Timeout) as e:
+            raise BackendError(f"{self.name} 서버에 연결할 수 없습니다: {url}") from e
+        if resp.status_code in (401, 403):
+            raise BackendError(f"{self.name} 인증 실패 ({resp.status_code}) — API 키를 확인하세요.")
+        if resp.status_code >= 400:
+            raise BackendError(f"{self.name} 오류 {resp.status_code}: {resp.text[:200]}")
+        return resp.json()
+
+    def fetch_models(self) -> list[str]:  # pragma: no cover - 인터페이스
+        raise NotImplementedError
+
+    def check(self) -> CheckResult:
+        """서버 연결·인증과 선택한 모델이 있는지 확인한다(번역 호출은 하지 않음)."""
+        try:
+            models = self.fetch_models()
+        except BackendError as e:
+            return CheckResult(False, str(e))
+        if self.model and not _has_model(models, self.model):
+            hint = f" — 터미널에서 `ollama pull {self.model}`" if self.name == "Ollama" else ""
+            return CheckResult(False, f"연결됨. 하지만 모델 `{self.model}`을 찾을 수 없습니다{hint}.", models)
+        return CheckResult(True, f"{self.name} 연결됨 · 모델 `{self.model}` 사용 가능", models)
+
+
+def _has_model(models: list[str], model: str) -> bool:
+    if not models:  # 목록을 주지 않는 서버는 통과
+        return True
+    names = set(models) | {m.removesuffix(":latest") for m in models}
+    return model in names or model.removesuffix(":latest") in names
 
 
 @dataclass
@@ -67,11 +106,14 @@ class OllamaBackend(Backend):
         )
         return data.get("message", {}).get("content", "")
 
+    def fetch_models(self) -> list[str]:
+        data = self._get(f"{self.host.rstrip('/')}/api/tags")
+        return [m["name"] for m in data.get("models", [])]
+
     def list_models(self) -> list[str]:
         try:
-            r = requests.get(f"{self.host.rstrip('/')}/api/tags", timeout=5)
-            return [m["name"] for m in r.json().get("models", [])]
-        except Exception:
+            return self.fetch_models()
+        except BackendError:
             return []
 
 
@@ -122,6 +164,20 @@ class GeminiBackend(Backend):
             raise RefusalError(f"Gemini 응답 차단: {reason}")
         return text
 
+    def fetch_models(self) -> list[str]:
+        if not self.api_key:
+            raise BackendError("Gemini API 키가 없습니다 (GEMINI_API_KEY).")
+        data = self._get(
+            "https://generativelanguage.googleapis.com/v1beta/models",
+            headers={"x-goog-api-key": self.api_key},
+            params={"pageSize": 200},
+        )
+        return [
+            m["name"].removeprefix("models/")
+            for m in data.get("models", [])
+            if "generateContent" in m.get("supportedGenerationMethods", [])
+        ]
+
 
 @dataclass
 class OpenAICompatBackend(Backend):
@@ -148,6 +204,11 @@ class OpenAICompatBackend(Backend):
         if choice.get("finish_reason") == "content_filter":
             raise RefusalError("API 콘텐츠 필터에 의해 차단됨")
         return choice.get("message", {}).get("content") or ""
+
+    def fetch_models(self) -> list[str]:
+        headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
+        data = self._get(f"{self.base_url.rstrip('/')}/models", headers=headers)
+        return sorted(m.get("id", "") for m in data.get("data", []) if m.get("id"))
 
 
 BACKENDS = {"ollama": "Ollama (로컬)", "gemini": "Gemini (무료 API)", "openai": "OpenAI 호환 API"}
