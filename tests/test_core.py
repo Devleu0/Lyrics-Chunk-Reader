@@ -165,3 +165,12 @@ def test_render_modes_and_units():
     assert "I <3 >  \nyou  \n→ S[I <3 > you]" in sent_md and "→ KO bye" in sent_md
     assert "&lt;3" in to_html(doc, MODE_SOURCE)
     assert "jk-sent" in to_html(doc, MODE_KOREAN, UNIT_SENTENCE)
+
+
+def test_bisect_keeps_sentence_groups_when_one_line_refused():
+    fb = FakeBackend(group=True, refuse_words=("BAD",))
+    doc = Translator(fb, max_attempts=1).translate("a >\nb\nc\nBAD", "en")
+    assert ["a >", "b"] in fb.calls  # 거부된 묶음을 반으로 나눠 다시 보냄
+    s = [(x.start, x.end) for x in doc.sentences()]
+    assert (1, 2) in s
+    assert doc.lines()[3].error and doc.lines()[2].ok

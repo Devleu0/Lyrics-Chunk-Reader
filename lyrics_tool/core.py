@@ -460,10 +460,27 @@ class Translator:
         numbered = list(enumerate(texts, start=1))
         got: dict[int, SegLine] = {}
         raw_sents: list[tuple[int, int, str]] = []
-        try:
-            got, raw_sents = self._call(numbered, lang, False, context)
-        except (RefusalError, ValueError):
-            pass  # 아래에서 줄 단위로 다시 시도
+
+        def bisect(part: list[tuple[int, str]], ctx: list[str] | None) -> None:
+            """묶음 전체가 거부되면 반씩 나눠 다시 보낸다.
+
+            거부되는 줄만 고립시키고 나머지 줄은 여러 줄 묶음으로 받아 문장 묶음 정보를 최대한 살린다.
+            한 줄짜리는 아래 단건 재시도에 맡긴다.
+            """
+            if len(part) < 2:
+                return
+            try:
+                lines, sents = self._call(part, lang, False, ctx)
+            except (RefusalError, ValueError):
+                mid = len(part) // 2
+                for half in (part[:mid], part[mid:]):
+                    rest = [t for j, t in numbered if j not in dict(half)]
+                    bisect(half, rest or context)
+                return
+            got.update(lines)
+            raw_sents.extend(sents)
+
+        bisect(numbered, context)
 
         # 빠진 줄은 1줄씩 (작은 단위가 저작물 필터·거부를 덜 탄다). 같은 구간 원문을 문맥으로 준다.
         for i, text in numbered:
