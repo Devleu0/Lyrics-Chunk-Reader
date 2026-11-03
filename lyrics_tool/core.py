@@ -487,6 +487,39 @@ class Translator:
         lines = [got[i] for i, _ in numbered]
         return SegResult(lines, normalize_sentences(len(lines), lines, raw_sents))
 
+    # ---- 부분 재번역
+    def retranslate(self, doc: Doc, line_no: int) -> None:
+        """line_no가 속한 문장 묶음만 다시 번역한다(캐시 무시). 나머지 줄은 그대로 둔다.
+
+        여러 줄 문장에 속한 줄이면 그 문장 전체를 다시 번역해 문장 직역과 줄 직역이 어긋나지 않게 한다.
+        결과는 구간 캐시 키에 저장되므로 같은 연이 반복되는 곳에도 함께 반영된다.
+        """
+        seg, pos = doc.locate(line_no)
+        texts = doc.texts(seg)
+        res = doc.results.get(seg.key)
+        if res is None:
+            res = self.translate_lines(texts, doc.lang, self._neighbors(doc, seg))
+        else:
+            a, b = next((a, b) for a, b, _ in res.sentences if a <= pos <= b)
+            ctx = texts[:a] + texts[b + 1 :] or self._neighbors(doc, seg)
+            new = self.translate_lines(texts[a : b + 1], doc.lang, ctx)
+            res = splice(res, a, b, new)
+        doc.results[seg.key] = res
+        self._save(seg.key, res)
+
+    def retry_failed(self, doc: Doc) -> Iterator[Doc]:
+        """번역 대기 구간과 실패한 줄을 다시 시도하며 매번 doc을 내보낸다."""
+        yield from self.run(doc)
+        done: set[tuple[str, int]] = set()
+        for seg in doc.segments:
+            res = doc.results[seg.key]
+            for pos, line_no in enumerate(seg.indices):
+                if res.lines[pos].error and (seg.key, pos) not in done:
+                    done.add((seg.key, pos))
+                    self.retranslate(doc, line_no)
+                    res = doc.results[seg.key]
+                    yield doc
+
     def _neighbors(self, doc: Doc, seg: Segment) -> list[str]:
         """앞 구간 끝 2줄 + 뒤 구간 앞 2줄."""
         k = doc.segments.index(seg)
@@ -498,3 +531,63 @@ class Translator:
         # 실패 줄이 있는 결과는 저장하지 않는다 → 다음에 다시 시도됨
         if self.cache is not None and res.ok:
             self.cache.put(key, res.to_dict())
+
+
+# ================================================================ 결과 수정
+
+
+def splice(res: SegResult, a: int, b: int, new: SegResult) -> SegResult:
+    """res의 a~b줄(0-based, 포함)을 new로 교체한다. 문장 묶음도 함께 교체."""
+    lines = res.lines[:a] + new.lines + res.lines[b + 1 :]
+    keep = [s for s in res.sentences if s[1] < a or s[0] > b]
+    moved = [(x + a, y + a, ko) for x, y, ko in new.sentences]
+    return SegResult(lines, sorted(keep + moved))
+
+
+def sentence_of(doc: Doc, line_no: int) -> Sentence:
+    return next(s for s in doc.sentences() if s.start <= line_no <= s.end)
+
+
+def chunks_to_text(chunks: list[Chunk]) -> str:
+    """편집용 텍스트: 한 줄에 '원문 | 한국어'."""
+    return "\n".join(f"{c.s} | {c.k}" for c in chunks)
+
+
+def text_to_chunks(text: str) -> list[Chunk]:
+    out = []
+    for row in text.splitlines():
+        if not row.strip():
+            continue
+        s, _, k = row.partition("|")
+        if s.strip():
+            out.append(Chunk(s.strip(), k.strip()))
+    return out
+
+
+def apply_edit(
+    doc: Doc,
+    line_no: int,
+    chunks: list[Chunk],
+    ko: str,
+    sentence_ko: str | None = None,
+    cache: Cache | None = None,
+) -> None:
+    """사용자가 직접 고친 내용을 반영한다. 구간이 모두 정상이면 캐시에도 저장."""
+    seg, pos = doc.locate(line_no)
+    res = doc.results.get(seg.key)
+    if res is None:
+        raise ValueError("아직 번역되지 않은 줄입니다.")
+    if not chunks or not ko.strip():
+        raise ValueError("청크와 줄 직역을 모두 입력해 주세요.")
+    res.lines[pos] = SegLine(chunks, ko.strip())
+    sents = []
+    for a, b, s_ko in res.sentences:
+        if a <= pos <= b:
+            if a == b:
+                s_ko = ko.strip()
+            elif sentence_ko is not None and sentence_ko.strip():
+                s_ko = sentence_ko.strip()
+        sents.append((a, b, s_ko))
+    res.sentences = sents
+    if cache is not None and res.ok:
+        cache.put(seg.key, res.to_dict())
