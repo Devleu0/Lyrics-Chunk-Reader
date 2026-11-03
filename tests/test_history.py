@@ -16,7 +16,7 @@ def test_save_list_update_delete():
     assert again == a  # 같은 가사·엔진·모델이면 갱신
     items = c.list_history()
     assert [h.id for h in items] == [a, b] and items[0].title == "새 제목"
-    assert "새 제목 · m ·" in items[0].label
+    assert "새 제목 · en→ko · m ·" in items[0].label
 
     c.delete_history(a)
     assert [h.id for h in c.list_history()] == [b]
@@ -32,4 +32,4 @@ def test_different_model_is_separate_entry():
 
 def test_default_title_truncates():
     assert default_title("\n\n" + "a" * 40) == "a" * 30 + "…"
-    assert default_title("") == "제목 없음"
+    assert default_title("") == "Untitled"

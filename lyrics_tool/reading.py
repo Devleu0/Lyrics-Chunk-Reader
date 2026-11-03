@@ -21,21 +21,22 @@ _KANJI_RUN = re.compile(_KANJI)
 _HAN_RUN = re.compile(r"[㐀-䶿一-鿿豈-﫿]+")
 _KATA = re.compile(r"[ァ-ヶ]")
 
-DICT_OFF = "사용 안 함"
-DICT_NAVER = "네이버 사전"
-DICT_INTL = "Jisho · MDBG · Wiktionary"
+DICT_NAVER = "naver"  # 한국어 뜻 (일·중·영·한)
+DICT_INTL = "intl"  # 일본어 Jisho, 중국어 MDBG, 그 밖은 Wiktionary
+DICT_OFF = "off"
 DICTS = [DICT_NAVER, DICT_INTL, DICT_OFF]
+_WIKTIONARY = "https://en.wiktionary.org/wiki/Special:Search?search={}"
 
 _URLS = {
     DICT_NAVER: {
         "ja": "https://ja.dict.naver.com/#/search?query={}",
         "zh": "https://zh.dict.naver.com/#/search?query={}",
         "en": "https://en.dict.naver.com/#/search?query={}",
+        "ko": "https://ko.dict.naver.com/#/search?query={}",
     },
     DICT_INTL: {
         "ja": "https://jisho.org/search/{}",
         "zh": "https://www.mdbg.net/chinese/dictionary?page=worddict&wdqb={}",
-        "en": "https://en.wiktionary.org/wiki/Special:Search?search={}",
     },
 }
 _EDGE_PUNCT = re.compile(r"^[\W_]+|[\W_]+$")
@@ -146,7 +147,8 @@ def ruby_text(text: str, lang: str) -> str:
 
 
 def dict_url(text: str, lang: str, dictionary: str) -> str:
-    tmpl = _URLS.get(dictionary, {}).get(lang)
+    """네이버가 없는 언어는 Wiktionary로 연결한다."""
+    tmpl = _URLS[dictionary].get(lang, _WIKTIONARY) if dictionary in _URLS else None
     query = _EDGE_PUNCT.sub("", text.strip())
     if not tmpl or not query:
         return ""

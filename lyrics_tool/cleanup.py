@@ -5,7 +5,7 @@
 - 구간 표시 [Chorus] [Verse 1] 【サビ】 (副歌) → 연 구분(빈 줄)으로 바꿈
 - 크레딧 줄 作词：… 作曲：… 編曲：…
 - 가사 사이트 잔여물 "You might also like", "123Embed"
-- 원문과 한국어 번역이 번갈아 있는 가사 → 한국어 줄 제거
+- 원문과 한국어 번역이 번갈아 있는 가사 → 한국어 줄 제거 (번역 언어가 한국어일 때만, drop_hangul)
 정리 결과와 함께 무엇을 바꿨는지 보고한다.
 """
 
@@ -14,6 +14,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 from statistics import median
+
+from .i18n import t as _t
 
 _TS = re.compile(r"\[(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?\]")
 _LRC_META = re.compile(r"^\s*\[(ti|ar|al|au|by|offset|length|re|ve|tool|#)\s*:[^\]]*\]\s*$", re.I)
@@ -53,8 +55,8 @@ def _ts_seconds(m: re.Match) -> float:
     return int(m.group(1)) * 60 + int(m.group(2)) + int(frac) / (10 ** len(frac))
 
 
-def clean_lyrics(text: str) -> tuple[str, list[str]]:
-    """가사를 정리하고 (정리된 가사, 변경 내역)을 반환한다."""
+def clean_lyrics(text: str, ui: str = "en", drop_hangul: bool = True) -> tuple[str, list[str]]:
+    """가사를 정리하고 (정리된 가사, 변경 내역)을 반환한다. 내역은 ui 언어 문장."""
     report: list[str] = []
     raw = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
     # 내용 줄 사이에 빈 줄이 있는지 (파일 끝 줄바꿈은 제외)
@@ -106,14 +108,14 @@ def clean_lyrics(text: str) -> tuple[str, list[str]]:
                         out.append("")
                     out.append(l)
                 lines = out
-                report.append(f"시간 간격으로 연 구분 {len(breaks)}곳 추가")
+                report.append(_t(ui, "clean_breaks", n=len(breaks)))
 
     # 원문과 한국어 번역이 섞인 경우 한국어 줄 제거 (원문이 한국어가 아닐 때만)
     nonblank = [l for l in lines if l]
     ko_lines = [l for l in nonblank if _hangul_ratio(l) > 0.5]
-    if nonblank and 0.2 <= len(ko_lines) / len(nonblank) <= 0.6:
+    if drop_hangul and nonblank and 0.2 <= len(ko_lines) / len(nonblank) <= 0.6:
         lines = [l for l in lines if not l or _hangul_ratio(l) <= 0.5]
-        report.append(f"한국어 번역 줄 {len(ko_lines)}줄 제거")
+        report.append(_t(ui, "clean_hangul", n=len(ko_lines)))
 
     # 빈 줄 정리: 연속 빈 줄은 하나로, 앞뒤 빈 줄 제거
     out: list[str] = []
@@ -125,9 +127,9 @@ def clean_lyrics(text: str) -> tuple[str, list[str]]:
         out.pop()
 
     counts = [
-        f"{what} {n}줄 정리"
-        for n, what in ((n_ts, "타임스탬프"), (n_meta, "LRC 정보"), (n_sec, "구간 표시(→ 연 구분)"),
-                        (n_credit, "크레딧"), (n_junk, "사이트 잔여물"))
+        _t(ui, key, n=n)
+        for n, key in ((n_ts, "clean_ts"), (n_meta, "clean_meta"), (n_sec, "clean_sections"),
+                       (n_credit, "clean_credits"), (n_junk, "clean_junk"))
         if n
     ]
     return "\n".join(out), counts + report

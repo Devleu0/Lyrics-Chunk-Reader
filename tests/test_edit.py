@@ -12,19 +12,19 @@ def test_retranslate_only_target_sentence():
     Translator(other).retranslate(doc, 2)  # 1~2줄이 한 문장 → 두 줄 함께 재번역
     assert other.calls == [["a >", "b"]]
     lines = doc.lines()
-    assert [l.ko for l in lines] == ["NEW a >", "NEW b", "KO c"]
+    assert [l.tr for l in lines] == ["NEW a >", "NEW b", "KO c"]
     s = sentence_of(doc, 1)
     assert (s.start, s.end) == (1, 2)
-    assert "[앞뒤 문맥" in other.prompts[0] and "c" in other.prompts[0]
+    assert "[CONTEXT" in other.prompts[0] and "c" in other.prompts[0]
 
 
 def test_retranslate_applies_to_repeated_stanza_and_cache():
     cache = Cache(":memory:")
     doc = Translator(FakeBackend(), cache=cache).translate("x\n\nx", "en")
     Translator(FakeBackend(tag="FIX"), cache=cache).retranslate(doc, 3)
-    assert [l.ko for l in doc.lines() if not l.blank] == ["FIX x", "FIX x"]
+    assert [l.tr for l in doc.lines() if not l.blank] == ["FIX x", "FIX x"]
     again = Translator(FakeBackend(), cache=cache).prepare("x\n\nx", "en")
-    assert again.lines()[0].ko == "FIX x"
+    assert again.lines()[0].tr == "FIX x"
 
 
 def test_retry_failed_fixes_errors():
@@ -41,10 +41,10 @@ def test_apply_edit_updates_line_sentence_and_cache():
     cache = Cache(":memory:")
     doc = Translator(FakeBackend(group=True), cache=cache).translate("p >\nq", "en")
     apply_edit(doc, 2, [Chunk("q", "큐")], "줄 수정", "문장 수정", cache=cache)
-    assert doc.lines()[1].ko == "줄 수정"
-    assert sentence_of(doc, 1).ko == "문장 수정"
+    assert doc.lines()[1].tr == "줄 수정"
+    assert sentence_of(doc, 1).tr == "문장 수정"
     again = Translator(FakeBackend(group=True), cache=cache).prepare("p >\nq", "en")
-    assert sentence_of(again, 2).ko == "문장 수정"
+    assert sentence_of(again, 2).tr == "문장 수정"
 
 
 def test_apply_edit_validation():

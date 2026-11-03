@@ -1,6 +1,6 @@
 from lyrics_tool.core import Translator
 from lyrics_tool.render import (
-    MODE_BOTH, MODE_KOREAN, MODE_SOURCE, UNIT_LINE, UNIT_SENTENCE, ViewOptions, to_html, to_markdown,
+    MODE_BOTH, MODE_TARGET, MODE_SOURCE, UNIT_LINE, UNIT_SENTENCE, ViewOptions, to_html, to_markdown,
     to_print_html,
 )
 
@@ -27,14 +27,14 @@ def test_source_mode_has_no_korean_line():
 
 def test_view_options():
     doc = _doc()
-    html = to_html(doc, MODE_BOTH, UNIT_LINE, ViewOptions(font_size=20, show_numbers=False, hide_korean=True))
+    html = to_html(doc, MODE_BOTH, UNIT_LINE, ViewOptions(font_size=20, show_numbers=False, hide_translation=True))
     assert "--jk-fs:20px" in html and "jk-nonum" in html and "jk-hide" in html
-    assert 'class="jk-k" tabindex="0"' in html and 'class="jk-ko" tabindex="0"' in html
+    assert 'class="jk-t" tabindex="0"' in html and 'class="jk-tr" tabindex="0"' in html
     plain = to_html(doc, MODE_BOTH, UNIT_LINE)
     assert "tabindex" not in plain and "jk-nonum" not in plain.split("</style>")[1]
 
 
 def test_print_html_is_standalone():
-    page = to_print_html(_doc(), MODE_KOREAN, UNIT_SENTENCE, None, "<제목>", "영어 · qwen")
+    page = to_print_html(_doc(), MODE_TARGET, UNIT_SENTENCE, None, "<제목>", "영어 · qwen")
     assert page.startswith("<!doctype html>") and "&lt;제목&gt;" in page
     assert "@media print" in page and "→ S[I wait &gt; you]" in page

@@ -6,9 +6,10 @@
        → 구간 결과(SegResult)를 캐시에 저장
 
 한 번의 호출로 세 가지를 함께 받는다. 그래서 보기 방식을 바꿔도 재호출하지 않는다.
-  - 줄별 chunks : 원문 어순 의미 단위 + 한국어 대응
-  - 줄별 ko     : 그 줄의 한국어 어순 직역
-  - sentences   : 여러 줄에 걸친 문장을 묶은 범위 + 묶음 전체의 한국어 어순 직역
+  - 줄별 chunks : 원문 어순 의미 단위(s) + 번역 언어로 단 뜻(t)
+  - 줄별 tr     : 그 줄을 번역 언어 어순으로 옮긴 직역
+  - sentences   : 여러 줄에 걸친 문장을 묶은 범위 + 묶음 전체의 직역
+원문·번역 언어는 langs.LANGS의 주요 언어 중에서 고른다.
 
 구간을 연 경계에서 자르므로 한 문장이 배치 경계에서 잘리는 일이 줄어들고,
 같은 연(후렴)이 반복되면 같은 캐시 키로 한 번만 번역한다.
@@ -24,25 +25,10 @@ from typing import Iterator
 
 from .backends import Backend, BackendError, RefusalError
 from .cache import Cache, make_key
+from .i18n import t as _t
+from .langs import LANGS, detect_language
 
-PROMPT_VERSION = 2
-LANG_NAMES = {"ja": "일본어", "zh": "중국어", "en": "영어"}
-
-_KANA = re.compile(r"[぀-ヿ]")
-_HAN = re.compile(r"[一-鿿]")
-_LATIN = re.compile(r"[A-Za-z]")
-
-
-def detect_language(text: str) -> str:
-    """가나가 있으면 일본어, 한자만 있으면 중국어, 그 외 라틴 문자면 영어."""
-    if _KANA.search(text):
-        return "ja"
-    han = len(_HAN.findall(text))
-    latin = len(_LATIN.findall(text))
-    if han and han >= latin:
-        return "zh"
-    return "en"
-
+PROMPT_VERSION = 3  # 3: 영어 프롬프트 + 번역 언어 선택, 필드 이름 t/tr
 
 # ================================================================ 데이터 모델
 
@@ -50,23 +36,23 @@ def detect_language(text: str) -> str:
 @dataclass
 class Chunk:
     s: str  # 원문 조각
-    k: str  # 한국어 대응
+    t: str  # 번역 언어로 단 뜻
 
 
 @dataclass
 class SegLine:
     chunks: list[Chunk] = field(default_factory=list)
-    ko: str = ""
+    tr: str = ""
     error: str = ""
 
     @property
     def ok(self) -> bool:
-        return bool(self.chunks) and bool(self.ko) and not self.error
+        return bool(self.chunks) and bool(self.tr) and not self.error
 
 
 @dataclass
 class SegResult:
-    """한 구간의 번역 결과. sentences는 구간 내 0-based 포함 범위 (start, end, ko)."""
+    """한 구간의 번역 결과. sentences는 구간 내 0-based 포함 범위 (start, end, tr)."""
 
     lines: list[SegLine]
     sentences: list[tuple[int, int, str]]
@@ -84,7 +70,7 @@ class SegResult:
     @classmethod
     def from_dict(cls, d: dict) -> "SegResult":
         lines = [
-            SegLine([Chunk(**c) for c in l["chunks"]], l["ko"], l.get("error", ""))
+            SegLine([Chunk(**c) for c in l["chunks"]], l["tr"], l.get("error", ""))
             for l in d["lines"]
         ]
         return cls(lines, [tuple(s) for s in d["sentences"]])
@@ -103,7 +89,7 @@ class LineResult:
     index: int
     source: str
     chunks: list[Chunk] = field(default_factory=list)
-    ko: str = ""
+    tr: str = ""
     error: str = ""
     pending: bool = False
 
@@ -113,32 +99,41 @@ class LineResult:
 
     @property
     def ok(self) -> bool:
-        return self.blank or (bool(self.chunks) and bool(self.ko) and not self.error)
+        return self.blank or (bool(self.chunks) and bool(self.tr) and not self.error)
 
 
 @dataclass
 class Sentence:
     start: int  # 1-based, 포함
     end: int
-    ko: str
+    tr: str
     error: str = ""
     pending: bool = False
 
 
+class LineNotFound(KeyError):
+    """번역 대상이 아닌 줄(빈 줄이거나 범위 밖). args[0] = 줄 번호."""
+
+
+class EditError(ValueError):
+    """수정할 수 없음. args[0] = i18n 키 (not_translated / need_chunks)."""
+
+
 @dataclass
 class Doc:
-    lang: str
+    lang: str  # 원문 언어
     sources: list[str]  # 0번 = 1번 줄
     segments: list[Segment]
     results: dict[str, SegResult] = field(default_factory=dict)
     title: str = ""
+    target: str = "ko"  # 번역 언어
 
     # ---- 조회
     def locate(self, line_no: int) -> tuple[Segment, int]:
         for seg in self.segments:
             if line_no in seg.indices:
                 return seg, seg.indices.index(line_no)
-        raise KeyError(f"{line_no}번 줄은 번역 대상이 아닙니다(빈 줄이거나 범위 밖).")
+        raise LineNotFound(line_no)
 
     def pending_keys(self) -> list[str]:
         seen, out = set(), []
@@ -162,7 +157,7 @@ class Doc:
                     r.pending = True
                 else:
                     sl = res.lines[pos]
-                    r.chunks, r.ko, r.error = list(sl.chunks), sl.ko, sl.error
+                    r.chunks, r.tr, r.error = list(sl.chunks), sl.tr, sl.error
         return out
 
     def sentences(self) -> list[Sentence]:
@@ -172,9 +167,9 @@ class Doc:
             if res is None:
                 out += [Sentence(i, i, "", pending=True) for i in seg.indices]
                 continue
-            for a, b, ko in res.sentences:
+            for a, b, tr in res.sentences:
                 err = next((res.lines[p].error for p in range(a, b + 1) if res.lines[p].error), "")
-                out.append(Sentence(seg.indices[a], seg.indices[b], ko, error=err))
+                out.append(Sentence(seg.indices[a], seg.indices[b], tr, error=err))
         return sorted(out, key=lambda s: s.start)
 
     def progress(self) -> tuple[int, int]:
@@ -185,6 +180,7 @@ class Doc:
         return json.dumps(
             {
                 "lang": self.lang,
+                "target": self.target,
                 "lines": [asdict(l) for l in self.lines()],
                 "sentences": [asdict(s) for s in self.sentences()],
             },
@@ -196,70 +192,84 @@ class Doc:
 # ================================================================ 프롬프트
 
 _CHUNK_GUIDE = {
-    "ja": (
-        "일본어는 문절(文節) 단위로 끊는다: 내용어 + 뒤따르는 조사·조동사를 한 덩어리로. "
-        "예) 君に / 会いたくて → 너를 / 만나고 싶어서. 조사의 뉘앙스(に·を·は·が·も)를 한국어 조사로 살린다."
-    ),
-    "zh": (
-        "중국어는 의미 단위(주어구·동사구·목적어구·부사구·보어)로 끊는다. "
-        "예) 我想 / 见到你 / 在这个夜晚 → 나는 ~하고 싶다 / 너를 만나다 / 이 밤에. "
-        "了·过·着·得 같은 기능어는 앞 단어와 묶고 의미를 한국어로 반영한다."
-    ),
-    "en": (
-        "영어는 끊어읽기(sense group) 단위로 끊는다: 주어 / 동사 / 목적어 / 전치사구 / 절. "
-        "예) I've been waiting / for you / all night → 나는 기다려 왔어 / 너를 / 밤새."
-    ),
+    "ja": "Split Japanese by bunsetsu (文節): a content word plus the particles/auxiliaries that follow it. "
+          "e.g. 君に / 会いたくて. Carry the nuance of particles (に·を·は·が·も) into the gloss.",
+    "zh": "Split Chinese into meaning units (subject phrase, verb phrase, object phrase, adverbial, complement). "
+          "e.g. 我想 / 见到你 / 在这个夜晚. Keep function words such as 了·过·着·得 with the preceding word "
+          "and reflect their meaning.",
+    "tr": "Split Korean by eojeol (space-separated units): a content word plus its particles and endings. "
+          "e.g. 너를 / 기다리고 있어. Reflect particles and verb endings in the gloss.",
+    "en": "Split English into sense groups: subject / verb / object / prepositional phrase / clause. "
+          "e.g. I've been waiting / for you / all night.",
+    "ru": "Split Russian into sense groups; keep prepositions with their noun and reflect case meaning in the gloss.",
+    "de": "Split German into sense groups; keep articles with nouns, and note separable prefixes and verb-final "
+          "clauses in the gloss.",
+    "th": "Thai has no spaces between words: split into short phrases (word groups) in the original order.",
 }
+_DEFAULT_GUIDE = (
+    "Split into sense groups: subject / verb (with attached pronouns) / object / prepositional phrase / clause. "
+    "Keep articles with their nouns."
+)
 
-SYSTEM_PROMPT = """너는 외국어 학습자를 돕는 문법 분석 도우미다.
-사용자는 자신이 공부하려고 가져온 텍스트를 줄 단위로 준다. 너의 일은 학습용 직독직해 주석을 다는 것이다.
-- 원문을 다시 써서 늘어놓거나 이어서 작성하지 않는다. 주어진 각 줄을 분석만 한다.
-- 문학적 의역 금지. 학습자가 원문 구조를 따라갈 수 있도록 직역한다.
-- 반드시 JSON 객체 하나만 출력한다. 설명·마크다운·사과문을 덧붙이지 않는다."""
+SYSTEM_PROMPT = """You are a grammar-annotation assistant for language learners.
+The user gives numbered lines of a text they are studying. Your job is to add study annotations: a chunk-by-chunk gloss and a literal translation.
+- Do not rewrite, continue, or reproduce the text beyond the given lines. Only analyze each given line.
+- No literary paraphrase: translate literally so the learner can follow the source structure.
+- Output exactly one JSON object. No explanations, markdown, or apologies."""
 
-_USER_TEMPLATE = """원문 언어: {lang_name}
+_USER_TEMPLATE = """Source language: {src}
+Target language: {tgt} (write every "t" and "tr" in {tgt})
 
-[작업]
-1. lines — 각 줄마다
-   - "chunks": 원문을 어순 그대로 의미 단위로 끊고, 조각마다 한국어 대응어를 단다.
-     "s"는 원문 조각 그대로이며, 모든 "s"를 이어 붙이면 원래 줄이 되어야 한다(공백 차이 허용).
-     "k"는 그 조각만의 한국어 뜻. 원문 순서를 바꾸지 않는다.
-   - "ko": 그 줄 하나를 자연스러운 한국어 어순으로 재배열한 직역. 단어 하나하나가 드러나야 하며 생략·창작 금지.
-2. sentences — 문장 묶음
-   - 연속된 줄이 한 문장(하나의 문법 단위)을 이루면 "from"~"to"로 묶고, 묶음 전체를 한국어 어순으로 직역한 "ko"를 단다.
-   - 혼자 완결된 줄은 from과 to가 같은 묶음이 된다.
-   - 모든 줄이 정확히 하나의 묶음에 속해야 하고, 묶음은 줄 순서대로 겹치지 않아야 한다.
+[TASK]
+1. lines — for each line
+   - "chunks": split the line into meaning units in the original order and gloss each unit in {tgt}.
+     "s" is the source chunk exactly as written; joining all "s" must reproduce the line (spacing may differ).
+     "t" is the {tgt} meaning of that chunk alone. Never reorder chunks.
+   - "tr": a literal translation of that line alone, rearranged into natural {tgt} word order. Every word must be reflected; no omissions or additions.
+2. sentences — sentence groups
+   - If consecutive lines form one sentence (one grammatical unit), group them with "from"–"to" and give "tr": a literal {tgt} translation of the whole group.
+   - A self-contained line is a group whose "from" and "to" are equal.
+   - Every line belongs to exactly one group; groups are in line order and never overlap.
 
-[끊기 기준]
-{chunk_guide}
+[CHUNKING]
+{guide}
 
-[출력 형식]
-{{"lines": [{{"i": 줄번호, "chunks": [{{"s": "원문조각", "k": "한국어"}}], "ko": "줄 직역"}}],
- "sentences": [{{"from": 시작줄, "to": 끝줄, "ko": "묶음 직역"}}]}}
-입력의 모든 줄번호에 대해 lines 결과를 정확히 하나씩 낸다.
+[OUTPUT FORMAT]
+{{"lines": [{{"i": line number, "chunks": [{{"s": "source chunk", "t": "gloss"}}], "tr": "line translation"}}],
+ "sentences": [{{"from": first line, "to": last line, "tr": "group translation"}}]}}
+Return exactly one "lines" entry for every input line number.
 {context}
-[입력]
+[INPUT]
 {numbered}"""
 
 _CONTEXT_TEMPLATE = """
-[앞뒤 문맥 — 뜻 파악에만 참고하고 출력하지 말 것]
+[CONTEXT — surrounding lines, for meaning only; do not output them]
 {context}
 """
 
 _RETRY_NOTE = (
-    "\n\n[참고] 이 요청은 학습자가 문장 구조를 이해하기 위한 문법 주석이며, "
-    "원문 재현이 아니라 분석 결과만 필요하다. 형식을 지켜 JSON으로만 답하라."
+    "\n\n[NOTE] This is a grammar annotation that helps a learner understand sentence structure. "
+    "Only the analysis is needed, not a reproduction of the text. Follow the format and answer in JSON only."
 )
 
 
+def _english(code: str) -> str:
+    return LANGS[code][0] if code in LANGS else code
+
+
 def build_user_prompt(
-    lines: list[tuple[int, str]], lang: str, retry: bool = False, context: list[str] | None = None
+    lines: list[tuple[int, str]],
+    lang: str,
+    retry: bool = False,
+    context: list[str] | None = None,
+    target: str = "tr",
 ) -> str:
     numbered = "\n".join(f"{i}: {text}" for i, text in lines)
     ctx = _CONTEXT_TEMPLATE.format(context="\n".join(context)) if context else ""
     prompt = _USER_TEMPLATE.format(
-        lang_name=LANG_NAMES.get(lang, lang),
-        chunk_guide=_CHUNK_GUIDE.get(lang, _CHUNK_GUIDE["en"]),
+        src=_english(lang),
+        tgt=_english(target),
+        guide=_CHUNK_GUIDE.get(lang, _DEFAULT_GUIDE),
         context=ctx,
         numbered=numbered,
     )
@@ -274,7 +284,7 @@ _REFUSAL_HINTS = (
 )
 
 
-def _extract_json(text: str) -> dict:
+def _extract_json(text: str, ui: str = "en") -> dict:
     text = text.strip()
     text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text)
     try:
@@ -289,8 +299,8 @@ def _extract_json(text: str) -> dict:
             pass
     lowered = text.lower()
     if any(h in lowered for h in _REFUSAL_HINTS):
-        raise RefusalError(f"모델이 거부했습니다: {text[:120]}")
-    raise ValueError(f"JSON 파싱 실패: {text[:120]}")
+        raise RefusalError(_t(ui, "refused", text=text[:120]))
+    raise ValueError(_t(ui, "json_fail", text=text[:120]))
 
 
 def _norm(s: str) -> str:
@@ -304,13 +314,13 @@ def _similarity(a: str, b: str) -> float:
 
 
 def parse_response(
-    text: str, expected: dict[int, str]
+    text: str, expected: dict[int, str], ui: str = "en"
 ) -> tuple[dict[int, SegLine], list[tuple[int, int, str]]]:
     """유효한 줄과 (검증 전) 문장 묶음 목록을 반환한다. 빠진 줄은 호출자가 재시도한다."""
-    data = _extract_json(text)
+    data = _extract_json(text, ui)
     items = data.get("lines") if isinstance(data, dict) else data
     if not isinstance(items, list):
-        raise ValueError("응답에 'lines' 배열이 없습니다.")
+        raise ValueError(_t(ui, "no_lines"))
 
     lines: dict[int, SegLine] = {}
     for item in items:
@@ -323,17 +333,17 @@ def parse_response(
         if i not in expected or i in lines:
             continue
         chunks = [
-            Chunk(s=str(c.get("s", "")).strip(), k=str(c.get("k", "")).strip())
+            Chunk(s=str(c.get("s", "")).strip(), t=str(c.get("t", "")).strip())
             for c in item.get("chunks") or []
             if isinstance(c, dict) and str(c.get("s", "")).strip()
         ]
-        ko = str(item.get("ko", "")).strip()
-        if not chunks or not ko:
+        tr = str(item.get("tr", "")).strip()
+        if not chunks or not tr:
             continue
         # 조각을 이으면 원문이 되는지 확인 — 다른 줄을 끌어오거나 창작한 응답을 걸러낸다.
         if _similarity(_norm("".join(c.s for c in chunks)), _norm(expected[i])) < 0.8:
             continue
-        lines[i] = SegLine(chunks, ko)
+        lines[i] = SegLine(chunks, tr)
 
     sentences: list[tuple[int, int, str]] = []
     raw_sents = data.get("sentences") if isinstance(data, dict) else None
@@ -344,9 +354,9 @@ def parse_response(
             a, b = int(s.get("from")), int(s.get("to"))
         except (TypeError, ValueError):
             continue
-        ko = str(s.get("ko", "")).strip()
-        if ko:
-            sentences.append((a, b, ko))
+        tr = str(s.get("tr", "")).strip()
+        if tr:
+            sentences.append((a, b, tr))
     return lines, sentences
 
 
@@ -359,20 +369,20 @@ def normalize_sentences(
     """
     taken = [False] * n
     out: list[tuple[int, int, str]] = []
-    for a, b, ko in sorted(raw):
+    for a, b, tr in sorted(raw):
         a, b = a - base, b - base
         if not (0 <= a <= b < n) or any(taken[a : b + 1]):
             continue
         if not all(lines[p].ok for p in range(a, b + 1)):
             continue
         if a == b:
-            ko = lines[a].ko  # 한 줄 묶음은 줄 직역과 같게 맞춘다
-        out.append((a, b, ko))
+            tr = lines[a].tr  # 한 줄 묶음은 줄 직역과 같게 맞춘다
+        out.append((a, b, tr))
         for p in range(a, b + 1):
             taken[p] = True
     for p in range(n):
         if not taken[p]:
-            out.append((p, p, lines[p].ko))
+            out.append((p, p, lines[p].tr))
     return sorted(out)
 
 
@@ -405,15 +415,19 @@ class Translator:
         batch_size: int = 8,
         max_attempts: int = 2,
         cache: Cache | None = None,
+        target: str = "ko",
+        ui: str = "en",
     ):
         self.backend = backend
+        self.target = target
+        self.ui = ui
         self.batch_size = max(1, batch_size)
         self.max_attempts = max(1, max_attempts)
         self.cache = cache
 
     # ---- 키
     def segment_key(self, lang: str, texts: list[str]) -> str:
-        return make_key(PROMPT_VERSION, self.backend.name, self.backend.model, lang, texts)
+        return make_key(PROMPT_VERSION, self.backend.kind, self.backend.model, lang, self.target, texts)
 
     # ---- 준비 / 실행
     def prepare(self, lyrics: str, lang: str = "auto", use_cache: bool = True) -> Doc:
@@ -424,7 +438,7 @@ class Translator:
         for idx in split_segments(sources, self.batch_size):
             texts = [sources[i - 1] for i in idx]
             segments.append(Segment(self.segment_key(lang, texts), idx))
-        doc = Doc(lang, sources, segments)
+        doc = Doc(lang, sources, segments, target=self.target)
         if self.cache is not None and use_cache:
             for seg in segments:
                 hit = self.cache.get(seg.key)
@@ -452,8 +466,8 @@ class Translator:
 
     # ---- 한 묶음 번역 (배치 → 실패 줄 단건 재시도)
     def _call(self, lines, lang, retry, context):
-        raw = self.backend.chat(SYSTEM_PROMPT, build_user_prompt(lines, lang, retry, context))
-        return parse_response(raw, dict(lines))
+        raw = self.backend.chat(SYSTEM_PROMPT, build_user_prompt(lines, lang, retry, context, self.target))
+        return parse_response(raw, dict(lines), self.ui)
 
     def translate_lines(
         self, texts: list[str], lang: str, context: list[str] | None = None
@@ -506,9 +520,9 @@ class Translator:
                 if 1 in one:
                     take({i: one[1]})
                     break
-                last = "응답 형식이 맞지 않음"
+                last = _t(self.ui, "bad_format")
             else:
-                got[i] = SegLine(error=last or "번역 실패")
+                got[i] = SegLine(error=last or _t(self.ui, "failed"))
 
         raw_sents = self._regroup(numbered, got, origin, raw_sents, lang, context)
         lines = [got[i] for i, _ in numbered]
@@ -601,7 +615,7 @@ def splice(res: SegResult, a: int, b: int, new: SegResult) -> SegResult:
     """res의 a~b줄(0-based, 포함)을 new로 교체한다. 문장 묶음도 함께 교체."""
     lines = res.lines[:a] + new.lines + res.lines[b + 1 :]
     keep = [s for s in res.sentences if s[1] < a or s[0] > b]
-    moved = [(x + a, y + a, ko) for x, y, ko in new.sentences]
+    moved = [(x + a, y + a, tr) for x, y, tr in new.sentences]
     return SegResult(lines, sorted(keep + moved))
 
 
@@ -610,8 +624,8 @@ def sentence_of(doc: Doc, line_no: int) -> Sentence:
 
 
 def chunks_to_text(chunks: list[Chunk]) -> str:
-    """편집용 텍스트: 한 줄에 '원문 | 한국어'."""
-    return "\n".join(f"{c.s} | {c.k}" for c in chunks)
+    """편집용 텍스트: 한 줄에 '원문 | 뜻'."""
+    return "\n".join(f"{c.s} | {c.t}" for c in chunks)
 
 
 def text_to_chunks(text: str) -> list[Chunk]:
@@ -619,9 +633,9 @@ def text_to_chunks(text: str) -> list[Chunk]:
     for row in text.splitlines():
         if not row.strip():
             continue
-        s, _, k = row.partition("|")
+        s, _, gloss = row.partition("|")
         if s.strip():
-            out.append(Chunk(s.strip(), k.strip()))
+            out.append(Chunk(s.strip(), gloss.strip()))
     return out
 
 
@@ -629,26 +643,26 @@ def apply_edit(
     doc: Doc,
     line_no: int,
     chunks: list[Chunk],
-    ko: str,
-    sentence_ko: str | None = None,
+    tr: str,
+    sentence_tr: str | None = None,
     cache: Cache | None = None,
 ) -> None:
     """사용자가 직접 고친 내용을 반영한다. 구간이 모두 정상이면 캐시에도 저장."""
     seg, pos = doc.locate(line_no)
     res = doc.results.get(seg.key)
     if res is None:
-        raise ValueError("아직 번역되지 않은 줄입니다.")
-    if not chunks or not ko.strip():
-        raise ValueError("청크와 줄 직역을 모두 입력해 주세요.")
-    res.lines[pos] = SegLine(chunks, ko.strip())
+        raise EditError("not_translated")
+    if not chunks or not tr.strip():
+        raise EditError("need_chunks")
+    res.lines[pos] = SegLine(chunks, tr.strip())
     sents = []
-    for a, b, s_ko in res.sentences:
+    for a, b, s_tr in res.sentences:
         if a <= pos <= b:
             if a == b:
-                s_ko = ko.strip()
-            elif sentence_ko is not None and sentence_ko.strip():
-                s_ko = sentence_ko.strip()
-        sents.append((a, b, s_ko))
+                s_tr = tr.strip()
+            elif sentence_tr is not None and sentence_tr.strip():
+                s_tr = sentence_tr.strip()
+        sents.append((a, b, s_tr))
     res.sentences = sents
     if cache is not None and res.ok:
         cache.put(seg.key, res.to_dict())

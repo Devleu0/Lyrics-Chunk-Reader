@@ -20,6 +20,8 @@ from dataclasses import dataclass, field
 
 import requests
 
+from .i18n import t as _t
+
 log = logging.getLogger(__name__)
 
 RETRY_STATUS = {429, 500, 502, 503, 504}
@@ -47,8 +49,10 @@ class Backend:
     timeout: int = 180
     temperature: float = 0.2
     retries: int = 3  # 일시적 오류 시 추가 시도 횟수
+    ui: str = "en"  # 오류 메시지 언어
 
-    name: str = field(default="base", init=False)
+    name: str = field(default="base", init=False)  # 화면·메시지용 이름
+    kind: str = field(default="base", init=False)  # 캐시 키용 고정 이름
 
     def chat(self, system: str, user: str) -> str:  # pragma: no cover - 인터페이스
         raise NotImplementedError
@@ -60,36 +64,37 @@ class Backend:
                 resp = requests.post(url, timeout=self.timeout, **kwargs)
             except (requests.ConnectionError, requests.Timeout) as e:
                 if isinstance(e, requests.Timeout):
-                    msg = f"{self.name} 응답 시간 초과 ({self.timeout}s)"
+                    msg = _t(self.ui, "timeout", name=self.name, s=self.timeout)
                 else:
-                    msg = f"{self.name} 서버에 연결할 수 없습니다: {url}"
+                    msg = _t(self.ui, "connect", name=self.name, url=url)
                 if last:
-                    raise BackendError(msg + _tries(attempt)) from e
+                    raise BackendError(msg + self._tries(attempt)) from e
                 self._wait(attempt, None, msg)
                 continue
             if resp.status_code < 400:
                 return resp.json()
-            msg = f"{self.name} 오류 {resp.status_code}: {_error_detail(resp)}"
+            msg = _t(self.ui, "http_error", name=self.name, status=resp.status_code, detail=_error_detail(resp))
             hint = _retry_after(resp)
             if resp.status_code not in RETRY_STATUS or last or (hint or 0) > MAX_WAIT:
-                raise BackendError(msg + _tries(attempt))
+                raise BackendError(msg + self._tries(attempt))
             self._wait(attempt, hint, msg)
         raise AssertionError("unreachable")  # pragma: no cover
 
     def _wait(self, attempt: int, hint: float | None, reason: str) -> None:
         delay = hint if hint is not None else min(2 * 2**attempt, 30) + random.uniform(0, 1)
-        log.warning("%s — %.0f초 후 다시 시도 (%d/%d)", reason.splitlines()[0], delay, attempt + 1, self.retries)
+        log.warning("%s — retrying in %.0fs (%d/%d)", reason.splitlines()[0], delay, attempt + 1, self.retries)
         time.sleep(delay)
 
     def _get(self, url: str, **kwargs) -> dict:
         try:
             resp = requests.get(url, timeout=10, **kwargs)
         except (requests.ConnectionError, requests.Timeout) as e:
-            raise BackendError(f"{self.name} 서버에 연결할 수 없습니다: {url}") from e
+            raise BackendError(_t(self.ui, "connect", name=self.name, url=url)) from e
         if resp.status_code in (401, 403):
-            raise BackendError(f"{self.name} 인증 실패 ({resp.status_code}) — API 키를 확인하세요.")
+            raise BackendError(_t(self.ui, "auth_fail", name=self.name, status=resp.status_code))
         if resp.status_code >= 400:
-            raise BackendError(f"{self.name} 오류 {resp.status_code}: {resp.text[:200]}")
+            raise BackendError(_t(self.ui, "http_error", name=self.name, status=resp.status_code,
+                                  detail=_error_detail(resp)))
         return resp.json()
 
     def fetch_models(self) -> list[str]:  # pragma: no cover - 인터페이스
@@ -102,13 +107,12 @@ class Backend:
         except BackendError as e:
             return CheckResult(False, str(e))
         if self.model and not _has_model(models, self.model):
-            hint = f" — 터미널에서 `ollama pull {self.model}`" if self.name == "Ollama" else ""
-            return CheckResult(False, f"연결됨. 하지만 모델 `{self.model}`을 찾을 수 없습니다{hint}.", models)
-        return CheckResult(True, f"{self.name} 연결됨 · 모델 `{self.model}` 사용 가능", models)
+            hint = _t(self.ui, "ollama_hint", model=self.model) if self.kind == "ollama" else ""
+            return CheckResult(False, _t(self.ui, "model_missing", model=self.model, hint=hint), models)
+        return CheckResult(True, _t(self.ui, "connected", name=self.name, model=self.model), models)
 
-
-def _tries(attempt: int) -> str:
-    return f" ({attempt + 1}회 시도)" if attempt else ""
+    def _tries(self, attempt: int) -> str:
+        return _t(self.ui, "tries", n=attempt + 1) if attempt else ""
 
 
 def _error_detail(resp: requests.Response) -> str:
@@ -143,6 +147,7 @@ def _has_model(models: list[str], model: str) -> bool:
 class OllamaBackend(Backend):
     host: str = "http://localhost:11434"
     name: str = field(default="Ollama", init=False)
+    kind: str = field(default="ollama", init=False)
 
     def chat(self, system: str, user: str) -> str:
         data = self._post(
@@ -176,10 +181,11 @@ class OllamaBackend(Backend):
 class GeminiBackend(Backend):
     api_key: str = ""
     name: str = field(default="Gemini", init=False)
+    kind: str = field(default="gemini", init=False)
 
     def chat(self, system: str, user: str) -> str:
         if not self.api_key:
-            raise BackendError("Gemini API 키가 없습니다 (GEMINI_API_KEY).")
+            raise BackendError(_t(self.ui, "no_gemini_key"))
         url = (
             "https://generativelanguage.googleapis.com/v1beta/models/"
             f"{self.model}:generateContent"
@@ -207,21 +213,21 @@ class GeminiBackend(Backend):
             },
         )
         if data.get("promptFeedback", {}).get("blockReason"):
-            raise RefusalError(f"Gemini 입력 차단: {data['promptFeedback']['blockReason']}")
+            raise RefusalError(_t(self.ui, "gemini_input_blocked", reason=data["promptFeedback"]["blockReason"]))
         cands = data.get("candidates") or []
         if not cands:
-            raise RefusalError("Gemini 응답 후보가 비어 있습니다.")
+            raise RefusalError(_t(self.ui, "gemini_empty"))
         reason = cands[0].get("finishReason", "")
         parts = cands[0].get("content", {}).get("parts", [])
         text = "".join(p.get("text", "") for p in parts)
         # RECITATION = 저작물 재현 필터. 줄을 잘게 나눠 재시도하면 통과되는 경우가 많다.
         if reason in ("RECITATION", "SAFETY", "BLOCKLIST", "PROHIBITED_CONTENT") and not text:
-            raise RefusalError(f"Gemini 응답 차단: {reason}")
+            raise RefusalError(_t(self.ui, "gemini_blocked", reason=reason))
         return text
 
     def fetch_models(self) -> list[str]:
         if not self.api_key:
-            raise BackendError("Gemini API 키가 없습니다 (GEMINI_API_KEY).")
+            raise BackendError(_t(self.ui, "no_gemini_key"))
         data = self._get(
             "https://generativelanguage.googleapis.com/v1beta/models",
             headers={"x-goog-api-key": self.api_key},
@@ -238,7 +244,8 @@ class GeminiBackend(Backend):
 class OpenAICompatBackend(Backend):
     base_url: str = "https://api.groq.com/openai/v1"
     api_key: str = ""
-    name: str = field(default="OpenAI 호환", init=False)
+    name: str = field(default="OpenAI-compatible", init=False)
+    kind: str = field(default="openai", init=False)
 
     def chat(self, system: str, user: str) -> str:
         headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
@@ -257,7 +264,7 @@ class OpenAICompatBackend(Backend):
         )
         choice = (data.get("choices") or [{}])[0]
         if choice.get("finish_reason") == "content_filter":
-            raise RefusalError("API 콘텐츠 필터에 의해 차단됨")
+            raise RefusalError(_t(self.ui, "content_filter"))
         return choice.get("message", {}).get("content") or ""
 
     def fetch_models(self) -> list[str]:
@@ -266,13 +273,18 @@ class OpenAICompatBackend(Backend):
         return sorted(m.get("id", "") for m in data.get("data", []) if m.get("id"))
 
 
-BACKENDS = {"ollama": "Ollama (로컬)", "gemini": "Gemini (무료 API)", "openai": "OpenAI 호환 API"}
+BACKENDS = ("ollama", "gemini", "openai")  # 화면 이름은 i18n의 engine_<kind>
 
 
 GEMINI_DEFAULT_MODEL = "gemini-3.5-flash-lite"
 
 
-def make_backend(kind: str, model: str = "", api_key: str = "", base_url: str = "", retries: int = 3) -> Backend:
+OLLAMA_DEFAULT_MODEL = "qwen3:8b"
+
+
+def make_backend(
+    kind: str, model: str = "", api_key: str = "", base_url: str = "", retries: int = 3, ui: str = "en"
+) -> Backend:
     """UI/환경변수 값으로 백엔드를 만든다. 빈 값은 환경변수, 그것도 비었으면 기본값을 쓴다."""
 
     def env(key: str, default: str = "") -> str:
@@ -281,15 +293,17 @@ def make_backend(kind: str, model: str = "", api_key: str = "", base_url: str = 
     retries = max(0, int(retries))
     if kind == "ollama":
         return OllamaBackend(
-            model=model or env("OLLAMA_MODEL", "qwen3:8b"),
+            model=model or env("OLLAMA_MODEL", OLLAMA_DEFAULT_MODEL),
             host=base_url or env("OLLAMA_HOST", "http://localhost:11434"),
             retries=retries,
+            ui=ui,
         )
     if kind == "gemini":
         return GeminiBackend(
             model=model or env("GEMINI_MODEL", GEMINI_DEFAULT_MODEL),
             api_key=api_key or env("GEMINI_API_KEY"),
             retries=retries,
+            ui=ui,
         )
     if kind == "openai":
         return OpenAICompatBackend(
@@ -297,5 +311,6 @@ def make_backend(kind: str, model: str = "", api_key: str = "", base_url: str = 
             base_url=base_url or env("OPENAI_BASE_URL", "https://api.groq.com/openai/v1"),
             api_key=api_key or env("OPENAI_API_KEY"),
             retries=retries,
+            ui=ui,
         )
-    raise ValueError(f"알 수 없는 백엔드: {kind}")
+    raise ValueError(f"unknown backend: {kind}")

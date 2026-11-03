@@ -7,7 +7,7 @@ from lyrics_tool.cache import Cache
 from lyrics_tool.core import (
     SegLine, Chunk, Translator, detect_language, normalize_sentences, parse_response, split_segments,
 )
-from lyrics_tool.render import MODE_KOREAN, MODE_SOURCE, UNIT_LINE, UNIT_SENTENCE, to_html, to_markdown
+from lyrics_tool.render import MODE_TARGET, MODE_SOURCE, UNIT_LINE, UNIT_SENTENCE, to_html, to_markdown
 
 
 class FakeBackend(Backend):
@@ -24,7 +24,7 @@ class FakeBackend(Backend):
 
     def chat(self, system, user):
         self.prompts.append(user)
-        body = user.split("[입력]\n", 1)[1].split("\n\n[참고]")[0]
+        body = user.split("[INPUT]\n", 1)[1].split("\n\n[NOTE]")[0]
         lines = [(int(a), b) for a, b in (l.split(": ", 1) for l in body.splitlines())]
         self.calls.append([t for _, t in lines])
         if self.raise_backend:
@@ -37,14 +37,14 @@ class FakeBackend(Backend):
         while k < len(lines):
             i, t = lines[k]
             if self.group and t.endswith(">") and k + 1 < len(lines):
-                sents.append({"from": i, "to": lines[k + 1][0], "ko": f"S[{t} {lines[k + 1][1]}]"})
+                sents.append({"from": i, "to": lines[k + 1][0], "tr": f"S[{t} {lines[k + 1][1]}]"})
                 k += 2
             else:
-                sents.append({"from": i, "to": i, "ko": "ignored"})
+                sents.append({"from": i, "to": i, "tr": "ignored"})
                 k += 1
         return json.dumps({
-            "lines": [{"i": i, "chunks": [{"s": w, "k": f"<{w}>"} for w in t.split()],
-                       "ko": f"{self.tag} {t}"} for i, t in lines],
+            "lines": [{"i": i, "chunks": [{"s": w, "t": f"<{w}>"} for w in t.split()],
+                       "tr": f"{self.tag} {t}"} for i, t in lines],
             "sentences": sents,
         }, ensure_ascii=False)
 
@@ -62,10 +62,10 @@ def test_split_segments_by_stanza_and_size():
 
 def test_parse_handles_code_fence_and_drops_bad_lines():
     text = "```json\n" + json.dumps({"lines": [
-        {"i": 1, "chunks": [{"s": "I", "k": "나"}, {"s": "run", "k": "달린다"}], "ko": "나는 달린다"},
-        {"i": 2, "chunks": [{"s": "totally different", "k": "x"}], "ko": "x"},  # 원문 불일치
-        {"i": 3, "chunks": [], "ko": "x"},  # 청크 없음
-    ], "sentences": [{"from": 1, "to": 2, "ko": "s"}]}) + "\n```"
+        {"i": 1, "chunks": [{"s": "I", "t": "나"}, {"s": "run", "t": "달린다"}], "tr": "나는 달린다"},
+        {"i": 2, "chunks": [{"s": "totally different", "t": "x"}], "tr": "x"},  # 원문 불일치
+        {"i": 3, "chunks": [], "tr": "x"},  # 청크 없음
+    ], "sentences": [{"from": 1, "to": 2, "tr": "s"}]}) + "\n```"
     lines, sents = parse_response(text, {1: "I run", 2: "we go", 3: "fly"})
     assert list(lines) == [1]
     assert sents == [(1, 2, "s")]
@@ -77,12 +77,12 @@ def test_parse_detects_refusal_text():
 
 
 def test_normalize_sentences_fills_gaps_and_drops_invalid():
-    ok = SegLine([Chunk("a", "b")], "ko")
+    ok = SegLine([Chunk("a", "b")], "tr")
     bad = SegLine(error="x")
     lines = [ok, ok, bad, ok, ok]
     raw = [(1, 2, "S12"), (2, 3, "overlap"), (3, 4, "has failed line"), (5, 9, "out of range")]
     got = normalize_sentences(5, lines, raw)
-    assert got == [(0, 1, "S12"), (2, 2, ""), (3, 3, "ko"), (4, 4, "ko")]
+    assert got == [(0, 1, "S12"), (2, 2, ""), (3, 3, "tr"), (4, 4, "tr")]
 
 
 def test_translate_preserves_blanks_and_dedups_repeated_stanza():
@@ -92,19 +92,19 @@ def test_translate_preserves_blanks_and_dedups_repeated_stanza():
     lines = doc.lines()
     assert [r.blank for r in lines] == [False, False, True, False, True, False, False]
     assert len(fb.calls) == 2  # 반복되는 연은 한 번만
-    assert lines[5].ko == lines[0].ko == "KO la la"
+    assert lines[5].tr == lines[0].tr == "KO la la"
 
 
 def test_sentence_grouping():
     doc = Translator(FakeBackend(group=True)).translate("I wait >\nfor you\nalone", "en")
-    sents = [(s.start, s.end, s.ko) for s in doc.sentences()]
+    sents = [(s.start, s.end, s.tr) for s in doc.sentences()]
     assert sents == [(1, 2, "S[I wait > for you]"), (3, 3, "KO alone")]
 
 
 def test_neighbor_context_is_sent():
     fb = FakeBackend()
     Translator(fb, batch_size=2).translate("a1\na2\na3", "en")
-    assert "[앞뒤 문맥" in fb.prompts[1] and "a2" in fb.prompts[1]
+    assert "[CONTEXT" in fb.prompts[1] and "a2" in fb.prompts[1]
 
 
 def test_batch_refusal_falls_back_to_single_lines():
@@ -119,7 +119,7 @@ def test_batch_refusal_falls_back_to_single_lines():
 
 def test_garbage_response_marks_errors():
     doc = Translator(FakeBackend(garbage=True), max_attempts=1).translate("a b", "en")
-    assert "거부" in doc.lines()[0].error
+    assert "refused" in doc.lines()[0].error
 
 
 def test_backend_error_propagates():
@@ -144,7 +144,7 @@ def test_cache_hit_skips_backend_and_skips_failed():
     fb2 = FakeBackend()
     doc = Translator(fb2, cache=cache).translate("ok\n\nBAD", "en")
     assert fb2.calls == [["BAD"]]  # 캐시 적중한 구간은 호출 없음
-    assert doc.lines()[0].ko == "KO ok"
+    assert doc.lines()[0].tr == "KO ok"
 
 
 def test_cache_key_depends_on_model():
@@ -160,11 +160,11 @@ def test_render_modes_and_units():
     doc = Translator(FakeBackend(group=True)).translate("I <3 >\nyou\n\nbye", "en")
     src_md = to_markdown(doc, MODE_SOURCE)
     assert "I / <3 / >" in src_md and "<I> / <<3> / <>>" in src_md
-    assert "→ KO you" in to_markdown(doc, MODE_KOREAN, UNIT_LINE)
-    sent_md = to_markdown(doc, MODE_KOREAN, UNIT_SENTENCE)
+    assert "→ KO you" in to_markdown(doc, MODE_TARGET, UNIT_LINE)
+    sent_md = to_markdown(doc, MODE_TARGET, UNIT_SENTENCE)
     assert "I <3 >  \nyou  \n→ S[I <3 > you]" in sent_md and "→ KO bye" in sent_md
     assert "&lt;3" in to_html(doc, MODE_SOURCE)
-    assert "jk-sent" in to_html(doc, MODE_KOREAN, UNIT_SENTENCE)
+    assert "jk-sent" in to_html(doc, MODE_TARGET, UNIT_SENTENCE)
 
 
 def test_bisect_keeps_sentence_groups_when_one_line_refused():
@@ -181,8 +181,8 @@ def test_regroup_restores_sentence_cut_by_bisect():
     doc = Translator(fb, max_attempts=1).translate("a >\nb\nBAD", "en")
     # [a >] | [b, BAD] 로 나뉘어 끊겼던 1~2줄 문장을, 거부 줄을 뺀 재요청으로 되살림
     assert fb.calls[-1] == ["a >", "b"]
-    assert "BAD" not in fb.prompts[-1].split("[입력]")[0]  # 거부 줄은 문맥에서도 제외
-    s = [(x.start, x.end, x.ko) for x in doc.sentences()]
+    assert "BAD" not in fb.prompts[-1].split("[INPUT]")[0]  # 거부 줄은 문맥에서도 제외
+    s = [(x.start, x.end, x.tr) for x in doc.sentences()]
     assert (1, 2, "S[a > b]") in s
 
 

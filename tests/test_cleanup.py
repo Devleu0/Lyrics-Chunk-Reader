@@ -12,7 +12,7 @@ I walk alone
 Stay with me
 You might also like
 Stay with me 12Embed"""
-    text, report = clean_lyrics(raw)
+    text, report = clean_lyrics(raw, ui="ko")
     assert text == "I walk alone\n(Oh baby)\n\nStay with me\nStay with me"
     assert any("구간 표시" in r for r in report)
     assert any("크레딧" in r for r in report)
@@ -32,7 +32,7 @@ def test_lrc_timestamps_meta_and_stanza_breaks():
         + [f"[00:{10 + 3 * k:02d}.00]line {k}" for k in range(4)]
         + [f"[00:{40 + 3 * k:02d}.50]next {k}" for k in range(4)]
     ) + "\n"  # 파일 끝 줄바꿈이 있어도 연 구분을 넣어야 함
-    text, report = clean_lyrics(raw)
+    text, report = clean_lyrics(raw, ui="ko")
     assert text == "line 0\nline 1\nline 2\nline 3\n\nnext 0\nnext 1\nnext 2\nnext 3"
     assert any("타임스탬프 8줄" in r for r in report)
     assert any("연 구분 1곳" in r for r in report)
@@ -40,7 +40,7 @@ def test_lrc_timestamps_meta_and_stanza_breaks():
 
 def test_drops_interleaved_korean_translation():
     raw = "君に会いたい\n너를 만나고 싶어\n夜が明ける\n밤이 밝아\n今日も歌う"
-    text, report = clean_lyrics(raw)
+    text, report = clean_lyrics(raw, ui="ko")
     assert text == "君に会いたい\n夜が明ける\n今日も歌う"
     assert any("한국어 번역 줄 2줄" in r for r in report)
 

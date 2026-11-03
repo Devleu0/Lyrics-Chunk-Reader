@@ -2,7 +2,7 @@ import pytest
 
 from lyrics_tool.core import Translator
 from lyrics_tool.reading import DICT_INTL, DICT_NAVER, DICT_OFF, available, dict_url, pieces, ruby_html, ruby_text
-from lyrics_tool.render import MODE_BOTH, MODE_KOREAN, UNIT_LINE, ViewOptions, to_html, to_markdown
+from lyrics_tool.render import MODE_BOTH, MODE_TARGET, UNIT_LINE, ViewOptions, to_html, to_markdown
 
 from test_core import FakeBackend
 
@@ -45,8 +45,8 @@ def _ja_doc():
 def test_render_ruby_and_links():
     body = to_html(_ja_doc(), MODE_BOTH, UNIT_LINE).split("</style>")[1]
     assert ('<a class="jk-s" href="https://ja.dict.naver.com/#/search?query=%E5%90%9B%E3%82%92" target="_blank" '
-            'rel="noopener noreferrer" title="사전에서 찾기"><ruby>君<rt>きみ</rt></ruby>を</a>') in body
-    korean = to_html(_ja_doc(), MODE_KOREAN, UNIT_LINE).split("</style>")[1]
+            'rel="noopener noreferrer" title="Look up in dictionary"><ruby>君<rt>きみ</rt></ruby>を</a>') in body
+    korean = to_html(_ja_doc(), MODE_TARGET, UNIT_LINE).split("</style>")[1]
     assert '<span class="jk-src"><ruby>君<rt>きみ</rt></ruby>を' in korean
     assert "君(きみ)を / 待(ま)って" in to_markdown(_ja_doc(), MODE_BOTH, UNIT_LINE)
 

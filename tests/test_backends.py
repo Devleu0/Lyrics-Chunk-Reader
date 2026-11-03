@@ -66,7 +66,7 @@ def test_post_retries_transient_errors(monkeypatch):
 def test_post_gives_up(monkeypatch):
     busy = '{"error": {"code": 503, "message": "high demand"}}'
     calls, _ = _fake_post(monkeypatch, [_Resp(503), _Resp(503, busy)])
-    with pytest.raises(BackendError, match="503: high demand .2회 시도"):
+    with pytest.raises(BackendError, match=r"503: high demand \(2 attempts\)"):
         OllamaBackend(model="m", retries=1)._post("u")
     calls, _ = _fake_post(monkeypatch, [_Resp(400, "bad")])  # 요청 자체가 틀리면 재시도 안 함
     with pytest.raises(BackendError, match="400: bad$"):
