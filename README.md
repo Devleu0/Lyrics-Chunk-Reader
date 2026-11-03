@@ -46,10 +46,11 @@
 
 - **연결 확인**: 번역 전에 서버 연결·API 키·모델 존재를 확인하고, 쓸 수 있는 모델을 목록에 채웁니다.
 - **보조 엔진**: 주 엔진에서 실패한 줄만 자동으로 다른 엔진(예: Ollama → Gemini)으로 다시 시도합니다. 보조 엔진의 키·주소는 `.env` 값을 씁니다.
+- **요청 실패 시 재시도 횟수**(기본 3, 0~10): 연결 끊김·시간 초과·한도 초과(429)·서버 과부하(5xx)이면 기다렸다가 다시 요청합니다. 서버가 대기 시간을 알려 주면 그만큼, 아니면 2·4·8…초(최대 30초)를 기다립니다. 1분 넘게 기다리라는 응답(일일 한도 소진 등)과 잘못된 요청(400·401 등)은 바로 오류로 표시합니다. 대기 내역은 앱을 실행한 터미널에 나옵니다.
 
 ## 폰에서 쓰기
 
-PC에서 `HOST=0.0.0.0 python app.py`로 실행하고, 같은 와이파이의 폰 브라우저에서 `http://<PC의 IP>:7860`을 엽니다. 화면은 폰 폭에 맞게 줄바꿈됩니다.
+PC에서 `HOST=0.0.0.0 python app.py`로 실행하고, 같은 와이파이의 폰 브라우저에서 `http://<PC의 IP>:7860`을 엽니다. Windows PowerShell에서는 `$env:HOST = "0.0.0.0"`을 먼저 실행한 뒤 `.venv\Scripts\python.exe app.py`를 실행하세요. 화면은 폰 폭에 맞게 줄바꿈됩니다.
 같은 네트워크의 누구나 접속할 수 있으니 공용 와이파이에서는 쓰지 마세요.
 
 ## 캐시
@@ -63,12 +64,29 @@ PC에서 `HOST=0.0.0.0 python app.py`로 실행하고, 같은 와이파이의 �
 
 ## 설치
 
-```bash
-python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt   # 일본어 사전(unidic-lite) 때문에 약 250MB
-cp .env.example .env    # 필요한 값만 채우기
-python app.py           # http://127.0.0.1:7860
+### Windows (PowerShell)
+
+가상환경을 만들고 의존성을 설치합니다. 가상환경 활성화 없이도 아래 명령으로 앱을 실행할 수 있습니다.
+
+```powershell
+py -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe app.py
 ```
+
+브라우저에서 http://127.0.0.1:7860 을 엽니다. 일본어 발음 사전(unidic-lite) 설치에 약 250MB가 필요합니다.
+설치 후에는 프로젝트 폴더의 `start.bat`을 더블클릭해 실행할 수 있습니다. Ollama 서버 연결과 웹 앱 준비를 확인한 후 브라우저를 엽니다. `qwen3:8b` 모델이 없으면 최초 실행 시 약 5.2GB를 다운로드합니다.
+
+### macOS / Linux
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+python app.py
+```
+
+API 키 등을 환경변수로 관리하려면 `.env.example`을 `.env`로 복사한 뒤 필요한 값만 채우세요. `.env` 파일은 선택 사항입니다.
 
 ### 엔진 1 — Ollama (로컬, 기본값, 추천)
 
@@ -85,6 +103,10 @@ python app.py           # http://127.0.0.1:7860
 ### 엔진 3 — OpenAI 호환 API
 
 Groq, OpenRouter, LM Studio 등 `/chat/completions`를 지원하는 서비스면 됩니다. `OPENAI_BASE_URL`, `OPENAI_API_KEY`, `OPENAI_MODEL`을 설정하세요.
+
+기본 모델은 `gemini-3.6-flash`입니다. 더 빠르게 쓰려면 `gemini-3.5-flash-lite`(끊어읽기가 조금 잘게 쪼개짐)를 모델 칸에 넣으세요. `gemini-2.5-flash`는 지원 종료 예정입니다.
+
+> **어떤 엔진을 쓸까?** VRAM 4GB 노트북(RTX 3050)에서 `qwen3:8b`는 일부가 CPU로 넘어가 4줄 연 하나에 약 40초가 걸렸고 번역도 부정확했습니다. 같은 연을 `gemini-3.6-flash`는 5~7초에 정확히 번역했습니다. VRAM이 8GB 미만이면 Gemini를 주 엔진으로, Ollama를 보조 엔진(가사가 밖으로 나가지 않고 저작물 필터가 없음)으로 쓰는 것을 권장합니다.
 
 > 무료 API의 사용량 한도와 모델 이름은 수시로 바뀝니다. 오류가 나면 각 서비스의 최신 모델명을 확인하세요.
 
