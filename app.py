@@ -19,6 +19,7 @@ from lyrics_tool.cleanup import clean_lyrics, read_lyrics_file
 from lyrics_tool.core import (
     LANG_NAMES, Doc, Translator, apply_edit, chunks_to_text, sentence_of, text_to_chunks,
 )
+from lyrics_tool.reading import DICT_NAVER, DICTS
 from lyrics_tool.render import (
     MODE_SOURCE, MODES, UNIT_LINE, UNITS, ViewOptions, to_html, to_markdown, to_print_html,
 )
@@ -35,6 +36,7 @@ ENGINE_HINTS = {
 DEFAULT_SETTINGS = {
     "engine": "ollama", "model": "", "base_url": "", "batch": 8,
     "mode": MODE_SOURCE, "unit": UNIT_LINE, "font": 16, "numbers": True, "hide": False,
+    "reading": True, "dict": DICT_NAVER,
     "fb_engine": "none", "fb_model": "", "auto_clean": True,
 }
 
@@ -73,8 +75,9 @@ def make_fallback(fb_engine, fb_model, engine, api_key, base_url, batch) -> Tran
     return make_translator(fb_engine, fb_model, api_key if same else "", base_url if same else "", batch)
 
 
-def _view(mode, unit, font, numbers, hide):
-    return mode, unit, ViewOptions(font_size=int(font), show_numbers=bool(numbers), hide_korean=bool(hide))
+def _view(mode, unit, font, numbers, hide, reading, dictionary):
+    return mode, unit, ViewOptions(font_size=int(font), show_numbers=bool(numbers), hide_korean=bool(hide),
+                                   reading=bool(reading), dictionary=dictionary or DICT_NAVER)
 
 
 # ---------------------------------------------------------------- 공통 출력
@@ -106,7 +109,7 @@ def _export(doc: Doc | None, mode, unit, opts: ViewOptions) -> list[str] | None:
     md = out_dir / f"{base}_{tag}.md"
     html = out_dir / f"{base}_{tag}_인쇄용.html"
     js = out_dir / f"{base}_원본.json"
-    md.write_text(to_markdown(doc, mode, unit), encoding="utf-8")
+    md.write_text(to_markdown(doc, mode, unit, opts), encoding="utf-8")
     meta = f"{LANG_NAMES.get(doc.lang, doc.lang)} · {mode} · {unit}"
     html.write_text(to_print_html(doc, mode, unit, opts, doc.title or "가사 직독직해", meta), encoding="utf-8")
     js.write_text(doc.to_json(), encoding="utf-8")
@@ -140,10 +143,10 @@ def load_file(path):
 
 
 def run_translate(lyrics, title, lang, auto_clean, engine, model, api_key, base_url, batch,
-                  fb_engine, fb_model, force, mode, unit, font, numbers, hide):
+                  fb_engine, fb_model, force, *view):
     if not lyrics or not lyrics.strip():
         raise gr.Error("가사를 입력해 주세요.")
-    mode, unit, opts = _view(mode, unit, font, numbers, hide)
+    mode, unit, opts = _view(*view)
     notes = []
     if auto_clean:
         lyrics, report = clean_lyrics(lyrics)
@@ -181,8 +184,8 @@ def run_translate(lyrics, title, lang, auto_clean, engine, model, api_key, base_
         _export(doc, mode, unit, opts), gr.update()
 
 
-def rerender(doc, mode, unit, font, numbers, hide):
-    mode, unit, opts = _view(mode, unit, font, numbers, hide)
+def rerender(doc, *view):
+    mode, unit, opts = _view(*view)
     return to_html(doc, mode, unit, opts), _export(doc, mode, unit, opts)
 
 
@@ -213,10 +216,10 @@ def _edit_fields(doc: Doc | None, line_no):
     return info, chunks_to_text(r.chunks), r.ko, sent
 
 
-def retranslate_line(doc, line_no, engine, model, api_key, base_url, batch, mode, unit, font, numbers, hide):
+def retranslate_line(doc, line_no, engine, model, api_key, base_url, batch, *view):
     if doc is None or not line_no:
         raise gr.Error("먼저 번역을 실행하고 줄 번호를 입력하세요.")
-    mode, unit, opts = _view(mode, unit, font, numbers, hide)
+    mode, unit, opts = _view(*view)
     t = make_translator(engine, model, api_key, base_url, batch)
     try:
         t.retranslate(doc, int(line_no))
@@ -228,10 +231,10 @@ def retranslate_line(doc, line_no, engine, model, api_key, base_url, batch, mode
             _export(doc, mode, unit, opts), *_edit_fields(doc, line_no))
 
 
-def save_line(doc, line_no, chunk_text, ko, sent_ko, mode, unit, font, numbers, hide):
+def save_line(doc, line_no, chunk_text, ko, sent_ko, *view):
     if doc is None or not line_no:
         raise gr.Error("먼저 번역을 실행하고 줄 번호를 입력하세요.")
-    mode, unit, opts = _view(mode, unit, font, numbers, hide)
+    mode, unit, opts = _view(*view)
     try:
         apply_edit(doc, int(line_no), text_to_chunks(chunk_text), ko, sent_ko, cache=get_cache())
     except (KeyError, ValueError) as e:
@@ -240,10 +243,10 @@ def save_line(doc, line_no, chunk_text, ko, sent_ko, mode, unit, font, numbers, 
     return to_html(doc, mode, unit, opts), doc, _export(doc, mode, unit, opts)
 
 
-def retry_all(doc, engine, model, api_key, base_url, batch, mode, unit, font, numbers, hide):
+def retry_all(doc, engine, model, api_key, base_url, batch, *view):
     if doc is None:
         raise gr.Error("먼저 번역을 실행하세요.")
-    mode, unit, opts = _view(mode, unit, font, numbers, hide)
+    mode, unit, opts = _view(*view)
     t = make_translator(engine, model, api_key, base_url, batch)
     try:
         for doc in t.retry_failed(doc):
@@ -317,15 +320,17 @@ def restore_settings(saved):
     key_u, url_u = _engine_visibility(s["engine"])
     return (s["engine"], gr.update(value=s["model"], info=ENGINE_HINTS[s["engine"]][0]), key_u,
             gr.update(value=s["base_url"], visible=url_u["visible"], placeholder=url_u["placeholder"]),
-            s["batch"], s["mode"], s["unit"], s["font"], s["numbers"], s["hide"], s["fb_engine"], s["fb_model"],
-            s["auto_clean"], gr.update(choices=_history_choices()))
+            s["batch"], s["mode"], s["unit"], s["font"], s["numbers"], s["hide"], s["reading"],
+            s["dict"] if s["dict"] in DICTS else DICT_NAVER, s["fb_engine"], s["fb_model"], s["auto_clean"],
+            gr.update(choices=_history_choices()))
 
 
-def save_settings(engine, model, base_url, batch, mode, unit, font, numbers, hide, fb_engine, fb_model, auto_clean):
+def save_settings(engine, model, base_url, batch, mode, unit, font, numbers, hide, reading, dictionary,
+                  fb_engine, fb_model, auto_clean):
     # API 키는 브라우저에 저장하지 않는다 (.env 사용 권장)
     return dict(engine=engine, model=model or "", base_url=base_url or "", batch=batch, mode=mode, unit=unit,
-                font=font, numbers=numbers, hide=hide, fb_engine=fb_engine, fb_model=fb_model or "",
-                auto_clean=auto_clean)
+                font=font, numbers=numbers, hide=hide, reading=reading, dict=dictionary,
+                fb_engine=fb_engine, fb_model=fb_model or "", auto_clean=auto_clean)
 
 
 # ---------------------------------------------------------------- 화면
@@ -395,6 +400,10 @@ def build_ui() -> gr.Blocks:
                         font = gr.Slider(12, 28, value=16, step=1, label="글자 크기")
                         numbers = gr.Checkbox(True, label="줄 번호")
                         hide = gr.Checkbox(False, label="한국어 가리기 (누르면 보임)")
+                    with gr.Row():
+                        reading = gr.Checkbox(True, label="발음 표기 (후리가나·병음)")
+                        dict_dd = gr.Dropdown(DICTS, value=DICT_NAVER, label="청크 사전 링크",
+                                              info="끊어읽기 카드의 원문을 누르면 새 탭에서 사전을 엽니다.")
                 status = gr.Markdown()
                 output = gr.HTML(to_html(None, MODE_SOURCE))
                 with gr.Accordion("줄 수정", open=False):
@@ -414,7 +423,7 @@ def build_ui() -> gr.Blocks:
                 files = gr.File(label="내보내기 (Markdown · 인쇄용 HTML · JSON)", file_count="multiple")
 
         E = [engine, model, api_key, base_url, batch]
-        V = [mode, unit, font, numbers, hide]
+        V = [mode, unit, font, numbers, hide, reading, dict_dd]
         edit_outputs = [edit_info, chunk_box, ko_box, sent_box]
         tr_inputs = [lyrics, title, lang, auto_clean, *E, fb_engine, fb_model, force, *V]
         tr_outputs = [lyrics, output, status, doc_state, files, hist_dd]
@@ -430,7 +439,7 @@ def build_ui() -> gr.Blocks:
                    cancels=[tr_evt, retry_evt])
 
         # 보기
-        gr.on([mode.change, unit.change, font.release, numbers.change, hide.change],
+        gr.on([mode.change, unit.change, font.release, numbers.change, hide.change, reading.change, dict_dd.change],
               rerender, [doc_state, *V], [output, files])
 
         # 줄 수정
@@ -452,11 +461,9 @@ def build_ui() -> gr.Blocks:
         hist_del.click(delete_history, hist_dd, hist_dd)
 
         # 설정 기억 (브라우저 저장소)
-        remembered = [engine, model, base_url, batch, mode, unit, font, numbers, hide, fb_engine, fb_model,
-                      auto_clean]
+        remembered = [engine, model, base_url, batch, *V, fb_engine, fb_model, auto_clean]
         demo.load(restore_settings, settings,
-                  [engine, model, api_key, base_url, batch, mode, unit, font, numbers, hide, fb_engine, fb_model,
-                   auto_clean, hist_dd])
+                  [engine, model, api_key, base_url, batch, *V, fb_engine, fb_model, auto_clean, hist_dd])
         gr.on([c.change for c in remembered], save_settings, remembered, settings)
 
         # Ctrl/Cmd + Enter 로 번역

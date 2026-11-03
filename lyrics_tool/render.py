@@ -7,6 +7,9 @@
 직역 단위 (한국어 직역이 보이는 방식에 적용)
   UNIT_LINE     : 줄마다 직역
   UNIT_SENTENCE : 여러 줄에 걸친 문장은 묶어서 한 번에 직역
+읽기 보조 (ViewOptions)
+  reading    : 일본어 후리가나·중국어 병음을 원문 위에 표시
+  dictionary : 청크 원문을 누르면 외부 사전 검색
 """
 
 from __future__ import annotations
@@ -15,6 +18,7 @@ from dataclasses import dataclass
 from html import escape
 
 from .core import Doc, LineResult, Sentence
+from .reading import DICT_NAVER, available, dict_url, ruby_html, ruby_text
 
 MODE_SOURCE = "원문 어순 (끊어읽기)"
 MODE_KOREAN = "한국어 어순 (직역)"
@@ -33,6 +37,24 @@ class ViewOptions:
     font_size: int = 16
     show_numbers: bool = True
     hide_korean: bool = False  # 셀프 테스트: 한국어를 흐리게, 누르거나 올리면 보임
+    reading: bool = True  # 후리가나·병음
+    dictionary: str = DICT_NAVER
+
+
+@dataclass
+class _Ctx:
+    mode: str
+    hide: bool
+    lang: str
+    ruby: bool
+    dictionary: str
+
+    @classmethod
+    def make(cls, doc: Doc, mode: str, opts: ViewOptions) -> "_Ctx":
+        return cls(mode, opts.hide_korean, doc.lang, opts.reading and available(doc.lang), opts.dictionary)
+
+    def src(self, text: str) -> str:
+        return ruby_html(text, self.lang) if self.ruby else escape(text)
 
 
 CSS = """
@@ -56,6 +78,9 @@ CSS = """
 .jk-pending { opacity: .45; }
 .jk-pending .jk-ko { font-style: italic; }
 .jk-hide .jk-k, .jk-hide .jk-ko:not(.jk-wait) { filter: blur(5px); cursor: pointer; transition: filter .15s; outline: none; }
+.jk-wrap a.jk-s, .jk-wrap a.jk-s:visited { color: inherit !important; text-decoration: none !important; }
+.jk-wrap a.jk-s:hover, .jk-wrap a.jk-s:focus { text-decoration: underline dotted !important; }
+.jk-wrap rt { font-size: .55em; font-weight: 400; opacity: .7; }
 .jk-hide .jk-k:hover, .jk-hide .jk-k:focus, .jk-hide .jk-ko:hover, .jk-hide .jk-ko:focus { filter: none; }
 """
 
@@ -79,41 +104,49 @@ def _ko(text: str, hide: bool) -> str:
     return f'<div class="jk-ko"{tab}>→ {escape(text)}</div>'
 
 
-def _head(r: LineResult, mode: str, hide: bool) -> str:
+def _chunk_src(text: str, c: _Ctx) -> str:
+    url = dict_url(text, c.lang, c.dictionary)
+    if not url:
+        return f'<span class="jk-s">{c.src(text)}</span>'
+    return (f'<a class="jk-s" href="{escape(url)}" target="_blank" rel="noopener noreferrer" '
+            f'title="사전에서 찾기">{c.src(text)}</a>')
+
+
+def _head(r: LineResult, c: _Ctx) -> str:
     """줄의 원문 부분 — 끊어읽기 카드 또는 원문 한 줄."""
-    if mode != MODE_KOREAN and r.chunks and not r.error and not r.pending:
-        tab = ' tabindex="0"' if hide else ""
+    if c.mode != MODE_KOREAN and r.chunks and not r.error and not r.pending:
+        tab = ' tabindex="0"' if c.hide else ""
         cards = "".join(
-            f'<span class="jk-chunk"><span class="jk-s">{escape(c.s)}</span>'
-            f'<span class="jk-k"{tab}>{escape(c.k)}</span></span>'
-            for c in r.chunks
+            f'<span class="jk-chunk">{_chunk_src(ch.s, c)}'
+            f'<span class="jk-k"{tab}>{escape(ch.k)}</span></span>'
+            for ch in r.chunks
         )
         return f'{_no(r.index)}<span class="jk-chunks">{cards}</span>'
-    return f'{_no(r.index)}<span class="jk-src">{escape(r.source)}</span>'
+    return f'{_no(r.index)}<span class="jk-src">{c.src(r.source)}</span>'
 
 
-def _line_html(r: LineResult, mode: str, hide: bool) -> str:
+def _line_html(r: LineResult, c: _Ctx) -> str:
     if r.pending:
-        return (f'<div class="jk-line jk-pending">{_head(r, mode, hide)}'
+        return (f'<div class="jk-line jk-pending">{_head(r, c)}'
                 f'<div class="jk-ko jk-wait">{PENDING_TEXT}</div></div>')
     if r.error:
-        return f'<div class="jk-line">{_head(r, mode, hide)}<div class="jk-err">⚠ {escape(r.error)}</div></div>'
-    tail = "" if mode == MODE_SOURCE else _ko(r.ko, hide)
-    return f'<div class="jk-line">{_head(r, mode, hide)}{tail}</div>'
+        return f'<div class="jk-line">{_head(r, c)}<div class="jk-err">⚠ {escape(r.error)}</div></div>'
+    tail = "" if c.mode == MODE_SOURCE else _ko(r.ko, c.hide)
+    return f'<div class="jk-line">{_head(r, c)}{tail}</div>'
 
 
-def _sentence_html(s: Sentence, lines: list[LineResult], mode: str, hide: bool) -> str:
+def _sentence_html(s: Sentence, lines: list[LineResult], c: _Ctx) -> str:
     group = lines[s.start - 1 : s.end]
     if s.start == s.end:
-        return _line_html(group[0], mode, hide)
-    heads = "".join(f'<div class="jk-line">{_head(r, mode, hide)}</div>' for r in group)
-    tail = f'<div class="jk-err">⚠ {escape(s.error)}</div>' if s.error else _ko(s.ko, hide)
+        return _line_html(group[0], c)
+    heads = "".join(f'<div class="jk-line">{_head(r, c)}</div>' for r in group)
+    tail = f'<div class="jk-err">⚠ {escape(s.error)}</div>' if s.error else _ko(s.ko, c.hide)
     return f'<div class="jk-sent">{heads}{tail}</div>'
 
 
 def _body(doc: Doc, mode: str, unit: str, opts: ViewOptions) -> str:
     lines = doc.lines()
-    hide = opts.hide_korean
+    c = _Ctx.make(doc, mode, opts)
     rows: list[str] = []
     if mode != MODE_SOURCE and unit == UNIT_SENTENCE:
         starts = {s.start: s for s in doc.sentences()}
@@ -123,17 +156,17 @@ def _body(doc: Doc, mode: str, unit: str, opts: ViewOptions) -> str:
                 rows.append('<div class="jk-gap"></div>')
             elif r.index in starts:
                 s = starts[r.index]
-                rows.append(_sentence_html(s, lines, mode, hide))
+                rows.append(_sentence_html(s, lines, c))
                 covered.update(range(s.start, s.end + 1))
             elif r.index not in covered:
-                rows.append(_line_html(r, mode, hide))
+                rows.append(_line_html(r, c))
     else:
         for r in lines:
-            rows.append('<div class="jk-gap"></div>' if r.blank else _line_html(r, mode, hide))
+            rows.append('<div class="jk-gap"></div>' if r.blank else _line_html(r, c))
     classes = ["jk-wrap"]
     if not opts.show_numbers:
         classes.append("jk-nonum")
-    if hide:
+    if c.hide:
         classes.append("jk-hide")
     return f'<div class="{" ".join(classes)}" style="--jk-fs:{int(opts.font_size)}px">{"".join(rows)}</div>'
 
@@ -156,14 +189,19 @@ def to_print_html(doc: Doc, mode: str, unit: str, opts: ViewOptions | None, titl
     )
 
 
-def to_markdown(doc: Doc, mode: str, unit: str = UNIT_LINE) -> str:
+def to_markdown(doc: Doc, mode: str, unit: str = UNIT_LINE, opts: ViewOptions | None = None) -> str:
     lines = doc.lines()
     out: list[str] = []
+    opts = opts or ViewOptions()
+    ruby = opts.reading and available(doc.lang)
+
+    def src(text: str) -> str:
+        return ruby_text(text, doc.lang) if ruby else text
 
     def head(r: LineResult) -> str:
         if mode != MODE_KOREAN and r.chunks:
-            return " / ".join(c.s for c in r.chunks) + "  \n" + " / ".join(c.k for c in r.chunks)
-        return r.source
+            return " / ".join(src(c.s) for c in r.chunks) + "  \n" + " / ".join(c.k for c in r.chunks)
+        return src(r.source)
 
     def one(r: LineResult) -> str:
         if r.pending:
