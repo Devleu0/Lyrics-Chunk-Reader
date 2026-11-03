@@ -460,6 +460,14 @@ class Translator:
         numbered = list(enumerate(texts, start=1))
         got: dict[int, SegLine] = {}
         raw_sents: list[tuple[int, int, str]] = []
+        origin: dict[int, int] = {}  # 줄 → 그 줄을 받아 온 호출 번호
+        call_no = [0]
+
+        def take(lines: dict[int, SegLine]) -> None:
+            call_no[0] += 1
+            for i, sl in lines.items():
+                got[i] = sl
+                origin[i] = call_no[0]
 
         def bisect(part: list[tuple[int, str]], ctx: list[str] | None) -> None:
             """묶음 전체가 거부되면 반씩 나눠 다시 보낸다.
@@ -477,7 +485,7 @@ class Translator:
                     rest = [t for j, t in numbered if j not in dict(half)]
                     bisect(half, rest or context)
                 return
-            got.update(lines)
+            take(lines)
             raw_sents.extend(sents)
 
         bisect(numbered, context)
@@ -495,14 +503,49 @@ class Translator:
                     last = str(e)
                     continue
                 if 1 in one:
-                    got[i] = one[1]
+                    take({i: one[1]})
                     break
                 last = "응답 형식이 맞지 않음"
             else:
                 got[i] = SegLine(error=last or "번역 실패")
 
+        raw_sents = self._regroup(numbered, got, origin, raw_sents, lang, context)
         lines = [got[i] for i, _ in numbered]
         return SegResult(lines, normalize_sentences(len(lines), lines, raw_sents))
+
+    def _regroup(self, numbered, got, origin, raw_sents, lang, context):
+        """분할 요청 때문에 서로 다른 호출로 받은 '연속된 정상 줄'을 한 번 더 묶어 요청한다.
+
+        거부된 줄을 빼고 보내므로 대개 통과하며, 끊겼던 문장 묶음을 되살린다.
+        실패하면 기존 결과를 그대로 둔다.
+        """
+        bad = {i for i, _ in numbered if got[i].error}
+        runs: list[list[tuple[int, str]]] = []
+        cur: list[tuple[int, str]] = []
+        for i, t in numbered:
+            if i in bad:
+                if cur:
+                    runs.append(cur)
+                cur = []
+            else:
+                cur.append((i, t))
+        if cur:
+            runs.append(cur)
+
+        for run in runs:
+            ids = {i for i, _ in run}
+            if len(run) < 2 or len({origin.get(i) for i in ids}) < 2:
+                continue
+            ctx = [t for i, t in numbered if i not in ids and i not in bad] or context
+            try:
+                lines, sents = self._call(run, lang, True, ctx)
+            except (RefusalError, ValueError):
+                continue
+            if set(lines) != ids:
+                continue
+            got.update(lines)
+            raw_sents = [s for s in raw_sents if s[1] < min(ids) or s[0] > max(ids)] + sents
+        return raw_sents
 
     # ---- 부분 재번역
     def retranslate(self, doc: Doc, line_no: int) -> None:

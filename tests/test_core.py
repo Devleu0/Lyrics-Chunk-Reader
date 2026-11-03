@@ -174,3 +174,19 @@ def test_bisect_keeps_sentence_groups_when_one_line_refused():
     s = [(x.start, x.end) for x in doc.sentences()]
     assert (1, 2) in s
     assert doc.lines()[3].error and doc.lines()[2].ok
+
+
+def test_regroup_restores_sentence_cut_by_bisect():
+    fb = FakeBackend(group=True, refuse_words=("BAD",))
+    doc = Translator(fb, max_attempts=1).translate("a >\nb\nBAD", "en")
+    # [a >] | [b, BAD] 로 나뉘어 끊겼던 1~2줄 문장을, 거부 줄을 뺀 재요청으로 되살림
+    assert fb.calls[-1] == ["a >", "b"]
+    assert "BAD" not in fb.prompts[-1].split("[입력]")[0]  # 거부 줄은 문맥에서도 제외
+    s = [(x.start, x.end, x.ko) for x in doc.sentences()]
+    assert (1, 2, "S[a > b]") in s
+
+
+def test_no_regroup_when_batch_succeeds():
+    fb = FakeBackend(group=True)
+    Translator(fb).translate("a >\nb\nc", "en")
+    assert len(fb.calls) == 1
