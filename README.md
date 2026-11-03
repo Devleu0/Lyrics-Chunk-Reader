@@ -18,6 +18,12 @@
 
 **표시 옵션**: 글자 크기, 줄 번호 숨기기, **한국어 가리기**(흐리게 가렸다가 누르거나 마우스를 올리면 보임 — 셀프 테스트용).
 
+**읽기 보조** (표시 옵션, LLM 호출 없음)
+
+- **발음 표기**(기본 켬): 일본어는 한자 위에 후리가나(`君(きみ)を待(ま)って` — 오쿠리가나 제외), 중국어는 한자마다 성조 병음. 번역 전 대기 중인 줄에도 바로 붙습니다. Markdown·인쇄용 HTML에도 들어갑니다.
+  - 일본어는 형태소 분석기(fugashi + unidic-lite), 중국어는 pypinyin을 씁니다. 다음자·고유명사는 가끔 틀릴 수 있습니다.
+- **청크 사전 링크**: 끊어읽기 카드의 원문을 누르면 새 탭에서 사전을 엽니다. 네이버 사전(한국어 뜻) 또는 Jisho·MDBG·Wiktionary 중 선택, 끌 수도 있습니다. 누를 때만 그 조각이 사전 사이트로 전송됩니다.
+
 결과는 Markdown(복습용), 인쇄용 HTML(브라우저에서 열어 인쇄·PDF 저장), JSON(원본 데이터)으로 내보낼 수 있습니다.
 
 ## 사용 흐름
@@ -59,7 +65,7 @@ PC에서 `HOST=0.0.0.0 python app.py`로 실행하고, 같은 와이파이의 �
 
 ```bash
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+pip install -r requirements.txt   # 일본어 사전(unidic-lite) 때문에 약 250MB
 cp .env.example .env    # 필요한 값만 채우기
 python app.py           # http://127.0.0.1:7860
 ```
@@ -100,6 +106,7 @@ lyrics_tool/
   core.py               연 단위 구간, 프롬프트, 재시도, 문장 묶음, 재번역·수정
   cache.py              SQLite 번역 캐시 + 최근 번역 목록
   cleanup.py            가사 자동 정리, TXT/LRC 인코딩 추정 읽기
+  reading.py            발음 표기(후리가나·병음), 사전 링크
   render.py             보기 방식·직역 단위별 HTML·Markdown 렌더링
 tests/                  가짜 엔진 기반 테스트 (python -m pytest)
 docs/learning-features-report.md   학습 편의 기능 정리 보고서
