@@ -112,9 +112,9 @@ API 키 등을 환경변수로 관리하려면 `.env.example`을 `.env`로 복�
 
 Groq, OpenRouter, LM Studio 등 `/chat/completions`를 지원하는 서비스면 됩니다. `OPENAI_BASE_URL`, `OPENAI_API_KEY`, `OPENAI_MODEL`을 설정하세요.
 
-기본 모델은 `gemini-3.6-flash`입니다. 더 빠르게 쓰려면 `gemini-3.5-flash-lite`(끊어읽기가 조금 잘게 쪼개짐)를 모델 칸에 넣으세요. `gemini-2.5-flash`는 지원 종료 예정입니다.
+기본 모델은 `gemini-3.5-flash-lite`입니다(4줄 연 약 2초). 끊어읽기가 조금 잘게 쪼개지는 편이라, 더 자연스러운 의미 단위가 필요하면 `gemini-3.6-flash`(5~7초)를 모델 칸에 넣으세요. `gemini-2.5-flash`는 지원 종료 예정입니다.
 
-> **어떤 엔진을 쓸까?** VRAM 4GB 노트북(RTX 3050)에서 `qwen3:8b`는 일부가 CPU로 넘어가 4줄 연 하나에 약 40초가 걸렸고 번역도 부정확했습니다. 같은 연을 `gemini-3.6-flash`는 5~7초에 정확히 번역했습니다. VRAM이 8GB 미만이면 Gemini를 주 엔진으로, Ollama를 보조 엔진(가사가 밖으로 나가지 않고 저작물 필터가 없음)으로 쓰는 것을 권장합니다.
+> **어떤 엔진을 쓸까?** VRAM 4GB 노트북(RTX 3050)에서 `qwen3:8b`는 일부가 CPU로 넘어가 4줄 연 하나에 약 40초가 걸렸고 번역도 부정확했습니다. 같은 연을 Gemini는 2~7초에 정확히 번역했습니다(`gemini-3.5-flash-lite` 약 2초, `gemini-3.6-flash` 5~7초). VRAM이 8GB 미만이면 Gemini를 주 엔진으로, Ollama를 보조 엔진(가사가 밖으로 나가지 않고 저작물 필터가 없음)으로 쓰는 것을 권장합니다.
 
 > 무료 API의 사용량 한도와 모델 이름은 수시로 바뀝니다. 오류가 나면 각 서비스의 최신 모델명을 확인하세요.
 

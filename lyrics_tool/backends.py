@@ -269,7 +269,7 @@ class OpenAICompatBackend(Backend):
 BACKENDS = {"ollama": "Ollama (로컬)", "gemini": "Gemini (무료 API)", "openai": "OpenAI 호환 API"}
 
 
-GEMINI_DEFAULT_MODEL = "gemini-3.6-flash"
+GEMINI_DEFAULT_MODEL = "gemini-3.5-flash-lite"
 
 
 def make_backend(kind: str, model: str = "", api_key: str = "", base_url: str = "", retries: int = 3) -> Backend:

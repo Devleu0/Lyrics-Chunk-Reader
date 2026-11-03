@@ -29,7 +29,7 @@ FALLBACK_CHOICES = [("사용 안 함", "none")] + [(v, k) for k, v in BACKENDS.i
 
 ENGINE_HINTS = {
     "ollama": ("비우면 OLLAMA_MODEL (기본 qwen3:8b)", "Ollama 주소 (기본 http://localhost:11434)", False),
-    "gemini": (f"비우면 GEMINI_MODEL (기본 {GEMINI_DEFAULT_MODEL}, 빠르게: gemini-3.5-flash-lite)", "", True),
+    "gemini": (f"비우면 GEMINI_MODEL (기본 {GEMINI_DEFAULT_MODEL}, 더 정확하게: gemini-3.6-flash)", "", True),
     "openai": ("비우면 OPENAI_MODEL", "Base URL (예: https://api.groq.com/openai/v1)", True),
 }
 
