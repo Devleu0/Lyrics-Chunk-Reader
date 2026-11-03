@@ -1,4 +1,4 @@
-"""번역 캐시와 최근 번역 목록 (SQLite 한 파일).
+"""번역 캐시 (SQLite 한 파일). 번역 히스토리는 history.py(곡마다 JSON 파일).
 
 키 = (프롬프트 버전, 엔진, 모델, 원문 언어, 번역 언어, 구간 원문)의 해시.
 - 같은 곡을 다시 열거나 반복되는 연(후렴)은 LLM을 다시 부르지 않는다.
@@ -13,8 +13,6 @@ import json
 import os
 import sqlite3
 import threading
-import time
-from dataclasses import dataclass
 from pathlib import Path
 
 DEFAULT_PATH = Path(os.environ.get("LYRICS_CACHE", Path.home() / ".lyrics-jikdok" / "cache.db"))
@@ -39,16 +37,6 @@ class Cache:
                 " key TEXT PRIMARY KEY, value TEXT NOT NULL,"
                 " updated TEXT DEFAULT CURRENT_TIMESTAMP)"
             )
-            self._conn.execute(
-                "CREATE TABLE IF NOT EXISTS history ("
-                " id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, lyrics TEXT NOT NULL,"
-                " lang TEXT NOT NULL, engine TEXT NOT NULL, model TEXT NOT NULL, batch INTEGER NOT NULL,"
-                " updated REAL NOT NULL,"
-                " UNIQUE(lyrics, engine, model, batch))"
-            )
-            cols = {r[1] for r in self._conn.execute("PRAGMA table_info(history)")}
-            if "target" not in cols:  # 번역 언어 선택 이전에 만든 DB
-                self._conn.execute("ALTER TABLE history ADD COLUMN target TEXT NOT NULL DEFAULT 'ko'")
             self._conn.commit()
 
     def get(self, key: str) -> dict | None:
@@ -74,68 +62,6 @@ class Cache:
     def __len__(self) -> int:
         with self._lock:
             return self._conn.execute("SELECT COUNT(*) FROM segments").fetchone()[0]
-
-    # ---------------------------------------------------------------- 최근 번역
-
-    def save_history(
-        self, title: str, lyrics: str, lang: str, engine: str, model: str, batch: int, target: str = "ko"
-    ) -> int:
-        """같은 가사·엔진·모델·배치면 제목·언어·시각만 갱신한다. 항목 id를 반환."""
-        title = title.strip() or default_title(lyrics)
-        with self._lock:
-            self._conn.execute(
-                "INSERT INTO history(title, lyrics, lang, engine, model, batch, updated, target) "
-                "VALUES(?, ?, ?, ?, ?, ?, ?, ?) "
-                "ON CONFLICT(lyrics, engine, model, batch) DO UPDATE SET "
-                " title = excluded.title, lang = excluded.lang, target = excluded.target, updated = excluded.updated",
-                (title, lyrics, lang, engine, model, int(batch), time.time(), target),
-            )
-            row = self._conn.execute(
-                "SELECT id FROM history WHERE lyrics = ? AND engine = ? AND model = ? AND batch = ?",
-                (lyrics, engine, model, int(batch)),
-            ).fetchone()
-            self._conn.commit()
-        return row[0]
-
-    def list_history(self, limit: int = 30) -> list["HistoryItem"]:
-        with self._lock:
-            rows = self._conn.execute(
-                "SELECT id, title, lyrics, lang, engine, model, batch, updated, target FROM history "
-                "ORDER BY updated DESC, id DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
-        return [HistoryItem(*r) for r in rows]
-
-    def get_history(self, item_id: int) -> "HistoryItem | None":
-        with self._lock:
-            r = self._conn.execute(
-                "SELECT id, title, lyrics, lang, engine, model, batch, updated, target FROM history WHERE id = ?",
-                (item_id,),
-            ).fetchone()
-        return HistoryItem(*r) if r else None
-
-    def delete_history(self, item_id: int) -> None:
-        with self._lock:
-            self._conn.execute("DELETE FROM history WHERE id = ?", (item_id,))
-            self._conn.commit()
-
-
-@dataclass
-class HistoryItem:
-    id: int
-    title: str
-    lyrics: str
-    lang: str
-    engine: str
-    model: str
-    batch: int
-    updated: float
-    target: str = "ko"
-
-    @property
-    def label(self) -> str:
-        when = time.strftime("%m/%d %H:%M", time.localtime(self.updated))
-        return f"{self.title} · {self.lang}→{self.target} · {self.model} · {when}"
 
 
 def default_title(lyrics: str, empty: str = "Untitled") -> str:

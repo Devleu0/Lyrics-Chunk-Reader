@@ -176,6 +176,33 @@ class Doc:
         keys = {s.key for s in self.segments}
         return len(keys & self.results.keys()), len(keys)
 
+    @property
+    def complete(self) -> bool:
+        """모든 구간이 번역됐고 실패한 줄이 없음 — 히스토리에 남길 수 있는 상태."""
+        return not self.pending_keys() and all(r.ok for r in self.lines())
+
+    def dump(self) -> dict:
+        """다시 번역하지 않고 그대로 되살릴 수 있는 전체 상태 (히스토리 파일용)."""
+        return {
+            "lang": self.lang,
+            "target": self.target,
+            "title": self.title,
+            "sources": self.sources,
+            "segments": [{"key": s.key, "indices": s.indices} for s in self.segments],
+            "results": {k: r.to_dict() for k, r in self.results.items()},
+        }
+
+    @classmethod
+    def restore(cls, d: dict) -> "Doc":
+        return cls(
+            lang=d["lang"],
+            sources=list(d["sources"]),
+            segments=[Segment(s["key"], list(s["indices"])) for s in d["segments"]],
+            results={k: SegResult.from_dict(r) for k, r in d["results"].items()},
+            title=d.get("title", ""),
+            target=d.get("target", "ko"),
+        )
+
     def to_json(self) -> str:
         return json.dumps(
             {
@@ -197,7 +224,7 @@ _CHUNK_GUIDE = {
     "zh": "Split Chinese into meaning units (subject phrase, verb phrase, object phrase, adverbial, complement). "
           "e.g. 我想 / 见到你 / 在这个夜晚. Keep function words such as 了·过·着·得 with the preceding word "
           "and reflect their meaning.",
-    "tr": "Split Korean by eojeol (space-separated units): a content word plus its particles and endings. "
+    "ko": "Split Korean by eojeol (space-separated units): a content word plus its particles and endings. "
           "e.g. 너를 / 기다리고 있어. Reflect particles and verb endings in the gloss.",
     "en": "Split English into sense groups: subject / verb / object / prepositional phrase / clause. "
           "e.g. I've been waiting / for you / all night.",
@@ -262,7 +289,7 @@ def build_user_prompt(
     lang: str,
     retry: bool = False,
     context: list[str] | None = None,
-    target: str = "tr",
+    target: str = "ko",
 ) -> str:
     numbered = "\n".join(f"{i}: {text}" for i, text in lines)
     ctx = _CONTEXT_TEMPLATE.format(context="\n".join(context)) if context else ""
