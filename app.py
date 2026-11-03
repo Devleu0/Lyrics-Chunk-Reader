@@ -337,6 +337,56 @@ def save_settings(engine, model, base_url, batch, retries, mode, unit, font, num
 # ---------------------------------------------------------------- 화면
 
 
+INPUT_LABEL = "가사 입력"
+
+APP_CSS = """
+.gradio-container { overflow: clip !important; }  /* hidden이면 툴바 sticky가 동작하지 않는다 */
+#jk-main { max-width: 1000px; margin: 0 auto; width: 100%; }
+#jk-head h2 { margin: 0 0 2px; }
+#jk-head p { margin: 0; opacity: .7; font-size: .9em; }
+#jk-toolbar { position: sticky; top: 0; z-index: 20; background: var(--body-background-fill);
+              padding: 6px 2px; border-bottom: 1px solid var(--border-color-primary);
+              gap: 6px 12px; align-items: center; flex-wrap: wrap; }
+#jk-toolbar > *, #jk-input-opts > * { flex: 0 0 auto !important; width: auto !important; min-width: 0 !important; }
+#jk-input-opts { flex-wrap: wrap; gap: 6px 12px; align-items: center; }
+#jk-status { font-size: .85em; opacity: .85; min-height: 1.4em; }
+#jk-status p { margin: 2px 0; }
+#jk-viewer { padding: 4px 2px 64px; }
+"""
+
+# 뷰어의 줄 번호를 누르면 오른쪽 '줄 수정'에 그 줄을 불러온다. Ctrl/Cmd+Enter로 번역.
+APP_JS = """() => {
+    document.addEventListener('keydown', (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+            const b = document.querySelector('#jk-translate');
+            if (b) { e.preventDefault(); b.click(); }
+        }
+    });
+    document.addEventListener('click', (e) => {
+        const no = e.target.closest('.jk-no');
+        const input = document.querySelector('#jk-line-no input');
+        if (!no || !input) return;
+        input.value = no.textContent.trim();
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        setTimeout(() => document.querySelector('#jk-load-line')?.click(), 80);
+    });
+}"""
+
+
+def collapse_input(lyrics, title):
+    """번역을 시작하면 입력 칸을 접고, 접힌 제목에 곡 이름과 줄 수를 보여 준다."""
+    text = (lyrics or "").strip()
+    if not text:
+        return gr.update(open=True, label=INPUT_LABEL)
+    n = sum(1 for line in text.splitlines() if line.strip())
+    name = (title or "").strip() or default_title(text)
+    return gr.update(open=False, label=f"{INPUT_LABEL} — {name} · {n}줄")
+
+
+def open_editor(doc, line_no):
+    return (*_edit_fields(doc, line_no), gr.update(open=True))
+
+
 def build_ui() -> gr.Blocks:
     default_engine = os.environ.get("LYRICS_BACKEND", "ollama")
     if default_engine not in BACKENDS:
@@ -345,86 +395,90 @@ def build_ui() -> gr.Blocks:
     model_info, url_ph, needs_key = ENGINE_HINTS[default_engine]
 
     with gr.Blocks(title="가사 직독직해") as demo:
-        gr.Markdown("## 🎧 가사 직독직해 번역\n일본어·중국어·영어 가사를 의미 단위로 끊어 한국어로 직역합니다.")
         doc_state = gr.State(None)
         settings = gr.BrowserState(DEFAULT_SETTINGS, storage_key="lyrics-jikdok-settings")
 
-        with gr.Row():
-            with gr.Column(scale=4):
-                title = gr.Textbox(label="곡 제목 (선택)", placeholder="비우면 첫 줄로 저장됩니다")
-                lyrics = gr.Textbox(label="가사", lines=16,
-                                    placeholder="가사를 붙여넣거나 아래에서 .txt/.lrc 파일을 불러오세요. "
-                                                "빈 줄은 연 구분으로 유지되며, 연 단위로 나눠 번역합니다.")
+        # ---- 왼쪽: 설정 (자주 바꾸지 않는 것)
+        with gr.Sidebar(label="설정", open=False, width=340):
+            with gr.Accordion("엔진", open=True):
+                engine = gr.Radio([(v, k) for k, v in BACKENDS.items()], value=default_engine, label="번역 엔진")
+                model = gr.Dropdown([], value="", label="모델", info=model_info, allow_custom_value=True)
+                api_key = gr.Textbox(label="API 키 (비우면 .env 값 사용, 저장되지 않음)", type="password",
+                                     visible=needs_key)
+                base_url = gr.Textbox(label="서버 주소", placeholder=url_ph, visible=bool(url_ph))
                 with gr.Row():
-                    lang = gr.Dropdown(LANG_CHOICES, value="auto", label="원문 언어", scale=2)
-                    btn = gr.Button("번역", variant="primary", scale=1)
-                    stop = gr.Button("중단", variant="stop", scale=1)
+                    check_btn = gr.Button("연결 확인", size="sm")
+                    clear_btn = gr.Button("캐시 비우기", size="sm")
+                check_msg = gr.Markdown()
+                batch = gr.Slider(1, 20, value=8, step=1, label="한 번에 보낼 최대 줄 수",
+                                  info="연이 이보다 길면 나눠 보냅니다. 작을수록 거부가 줄고, 클수록 빠릅니다. "
+                                       "값을 바꾸면 기존 캐시와 구간이 달라집니다.")
+                retries = gr.Slider(0, 10, value=3, step=1, label="요청 실패 시 재시도 횟수",
+                                    info="연결 끊김·시간 초과·한도 초과(429)·서버 과부하(5xx)일 때 기다렸다가 "
+                                         "다시 요청합니다. 서버가 알려 준 대기 시간, 없으면 2·4·8…초.")
+                fb_engine = gr.Dropdown(FALLBACK_CHOICES, value="none", label="보조 엔진",
+                                        info="주 엔진에서 실패한 줄만 다시 시도합니다. 키·주소는 .env 값을 씁니다.")
+                fb_model = gr.Textbox(label="보조 모델", placeholder="비우면 .env 기본값")
+                gr.Markdown("Ollama는 가사가 PC 밖으로 나가지 않습니다. API 엔진은 입력이 해당 서비스로 전송됩니다.")
+            with gr.Accordion("표시", open=False):
+                font = gr.Slider(12, 28, value=16, step=1, label="글자 크기")
+                numbers = gr.Checkbox(True, label="줄 번호 (누르면 그 줄 수정)")
+                dict_dd = gr.Dropdown(DICTS, value=DICT_NAVER, label="청크 사전 링크",
+                                      info="끊어읽기 카드의 원문을 누르면 새 탭에서 사전을 엽니다.")
+            with gr.Accordion("최근 번역", open=False):
+                hist_dd = gr.Dropdown([], label="항목", info="불러오면 저장된 엔진 설정으로 캐시에서 바로 복원합니다.")
                 with gr.Row():
-                    auto_clean = gr.Checkbox(True, label="번역 전 가사 자동 정리")
-                    force = gr.Checkbox(False, label="캐시 무시하고 새로 번역")
-                with gr.Row():
-                    clean_btn = gr.Button("가사 정리만 하기", size="sm")
-                    upload = gr.UploadButton("파일 불러오기 (.txt .lrc)", file_types=[".txt", ".lrc"], size="sm")
+                    hist_load = gr.Button("불러오기", size="sm", variant="primary")
+                    hist_refresh = gr.Button("새로고침", size="sm")
+                    hist_del = gr.Button("삭제", size="sm")
+            with gr.Accordion("내보내기", open=True):
+                files = gr.File(label="Markdown · 인쇄용 HTML · JSON", file_count="multiple")
 
-                with gr.Accordion("엔진 설정", open=False):
-                    engine = gr.Radio([(v, k) for k, v in BACKENDS.items()], value=default_engine, label="번역 엔진")
-                    model = gr.Dropdown([], value="", label="모델", info=model_info, allow_custom_value=True)
-                    api_key = gr.Textbox(label="API 키 (비우면 .env 값 사용, 저장되지 않음)", type="password",
-                                         visible=needs_key)
-                    base_url = gr.Textbox(label="서버 주소", placeholder=url_ph, visible=bool(url_ph))
-                    with gr.Row():
-                        check_btn = gr.Button("연결 확인", size="sm")
-                        clear_btn = gr.Button("캐시 비우기", size="sm")
-                    check_msg = gr.Markdown()
-                    batch = gr.Slider(1, 20, value=8, step=1, label="한 번에 보낼 최대 줄 수",
-                                      info="연이 이보다 길면 나눠 보냅니다. 작을수록 거부가 줄고, 클수록 빠릅니다. "
-                                           "값을 바꾸면 기존 캐시와 구간이 달라집니다.")
-                    retries = gr.Slider(0, 10, value=3, step=1, label="요청 실패 시 재시도 횟수",
-                                        info="연결 끊김·시간 초과·한도 초과(429)·서버 과부하(5xx)일 때 기다렸다가 "
-                                             "다시 요청합니다. 서버가 알려 준 대기 시간, 없으면 2·4·8…초.")
-                    gr.Markdown("**보조 엔진** — 주 엔진에서 실패한 줄만 자동으로 다시 시도합니다. 키·주소는 .env 값을 씁니다.")
-                    with gr.Row():
-                        fb_engine = gr.Dropdown(FALLBACK_CHOICES, value="none", label="보조 엔진")
-                        fb_model = gr.Textbox(label="보조 모델", placeholder="비우면 .env 기본값")
-                    gr.Markdown("Ollama는 가사가 PC 밖으로 나가지 않습니다. API 엔진은 입력이 해당 서비스로 전송됩니다.")
+        # ---- 오른쪽: 줄 수정 (뷰어의 줄 번호를 누르면 열림)
+        with gr.Sidebar(label="줄 수정", open=False, position="right", width=380) as edit_bar:
+            gr.Markdown("뷰어의 **줄 번호**를 누르면 그 줄을 불러옵니다. 현재 엔진으로 다시 번역하거나 직접 고쳐 "
+                        "저장하세요. 같은 연이 반복되면 함께 반영됩니다.")
+            with gr.Row():
+                line_no = gr.Number(label="줄 번호", precision=0, minimum=1, scale=2, elem_id="jk-line-no")
+                load_btn = gr.Button("불러오기", scale=1, elem_id="jk-load-line")
+            edit_info = gr.Markdown()
+            chunk_box = gr.Textbox(label="청크 (한 줄에 `원문 | 한국어`)", lines=5)
+            ko_box = gr.Textbox(label="줄 직역 (한국어 어순)")
+            sent_box = gr.Textbox(label="문장 직역", visible=False)
+            with gr.Row():
+                retrans_btn = gr.Button("이 줄 다시 번역")
+                save_btn = gr.Button("수정 저장", variant="primary")
+            retry_btn = gr.Button("실패한 줄 모두 다시 번역")
 
-                with gr.Accordion("최근 번역", open=False):
-                    hist_dd = gr.Dropdown([], label="항목", info="불러오면 저장된 엔진 설정으로 캐시에서 바로 복원합니다.")
-                    with gr.Row():
-                        hist_load = gr.Button("불러오기", size="sm", variant="primary")
-                        hist_refresh = gr.Button("새로고침", size="sm")
-                        hist_del = gr.Button("목록에서 삭제", size="sm")
+        # ---- 가운데: 입력(번역하면 접힘) + 뷰어
+        with gr.Column(elem_id="jk-main"):
+            gr.Markdown("## 🎧 가사 직독직해\n일본어·중국어·영어 가사를 의미 단위로 끊어 한국어로 직역합니다. "
+                        "설정은 왼쪽, 줄 수정은 오른쪽 사이드바에 있습니다.", elem_id="jk-head")
 
-            with gr.Column(scale=6):
-                with gr.Row():
-                    mode = gr.Radio(MODES, value=MODE_SOURCE, label="보기 방식")
-                    unit = gr.Radio(UNITS, value=UNIT_LINE, label="직역 단위")
-                with gr.Accordion("표시 옵션", open=False):
-                    with gr.Row():
-                        font = gr.Slider(12, 28, value=16, step=1, label="글자 크기")
-                        numbers = gr.Checkbox(True, label="줄 번호")
-                        hide = gr.Checkbox(False, label="한국어 가리기 (누르면 보임)")
-                    with gr.Row():
-                        reading = gr.Checkbox(True, label="발음 표기 (후리가나·병음)")
-                        dict_dd = gr.Dropdown(DICTS, value=DICT_NAVER, label="청크 사전 링크",
-                                              info="끊어읽기 카드의 원문을 누르면 새 탭에서 사전을 엽니다.")
-                status = gr.Markdown()
-                output = gr.HTML(to_html(None, MODE_SOURCE))
-                with gr.Accordion("줄 수정", open=False):
-                    gr.Markdown("줄 번호를 넣고 불러온 뒤, 현재 엔진 설정으로 다시 번역하거나 직접 고쳐 저장합니다. "
-                                "같은 연이 반복되면 함께 반영됩니다.")
-                    with gr.Row():
-                        line_no = gr.Number(label="줄 번호", precision=0, minimum=1, scale=1)
-                        load_btn = gr.Button("불러오기", scale=1)
-                    edit_info = gr.Markdown()
-                    chunk_box = gr.Textbox(label="청크 (한 줄에 `원문 | 한국어`)", lines=5)
-                    ko_box = gr.Textbox(label="줄 직역 (한국어 어순)")
-                    sent_box = gr.Textbox(label="문장 직역", visible=False)
-                    with gr.Row():
-                        retrans_btn = gr.Button("이 줄 다시 번역")
-                        save_btn = gr.Button("수정 저장", variant="primary")
-                    retry_btn = gr.Button("실패한 줄 모두 다시 번역")
-                files = gr.File(label="내보내기 (Markdown · 인쇄용 HTML · JSON)", file_count="multiple")
+            with gr.Accordion(INPUT_LABEL, open=True) as input_acc:
+                lyrics = gr.Textbox(show_label=False, lines=8, max_lines=20,
+                                    placeholder="가사를 붙여넣고 번역 (Ctrl/Cmd+Enter). 빈 줄은 연 구분으로 유지됩니다.\n"
+                                                "[Chorus]·타임스탬프·크레딧·섞인 한국어 번역 줄은 자동으로 정리합니다.")
+                with gr.Row(equal_height=True):
+                    title = gr.Textbox(show_label=False, placeholder="곡 제목 (선택, 비우면 첫 줄)", scale=3,
+                                       container=False)
+                    lang = gr.Dropdown(LANG_CHOICES, value="auto", show_label=False, scale=1, container=False)
+                    btn = gr.Button("번역", variant="primary", scale=1, elem_id="jk-translate")
+                    stop = gr.Button("중단", variant="stop", scale=0, min_width=70)
+                with gr.Row(elem_id="jk-input-opts"):
+                    auto_clean = gr.Checkbox(True, label="자동 정리", container=False)
+                    force = gr.Checkbox(False, label="캐시 무시", container=False)
+                    clean_btn = gr.Button("정리만 하기", size="sm", scale=0)
+                    upload = gr.UploadButton("파일 (.txt .lrc)", file_types=[".txt", ".lrc"], size="sm", scale=0)
+
+            with gr.Row(elem_id="jk-toolbar"):
+                mode = gr.Radio(MODES, value=MODE_SOURCE, show_label=False, container=False)
+                unit = gr.Radio(UNITS, value=UNIT_LINE, show_label=False, container=False, visible=False)
+                reading = gr.Checkbox(True, label="발음", container=False)
+                hide = gr.Checkbox(False, label="한국어 가리기", container=False)
+                edit_toggle = gr.Button("✎ 줄 수정", size="sm", scale=0)
+            status = gr.Markdown(elem_id="jk-status")
+            output = gr.HTML(to_html(None, MODE_SOURCE), elem_id="jk-viewer")
 
         E = [engine, model, api_key, base_url, batch, retries]
         V = [mode, unit, font, numbers, hide, reading, dict_dd]
@@ -436,19 +490,22 @@ def build_ui() -> gr.Blocks:
         clean_btn.click(clean_text, lyrics, [lyrics, status])
         upload.upload(load_file, upload, [lyrics, title, status])
 
-        # 번역
+        # 번역 — 시작하면 입력 칸을 접어 뷰어를 넓힌다
         tr_evt = btn.click(run_translate, tr_inputs, tr_outputs)
+        btn.click(collapse_input, [lyrics, title], input_acc)
         retry_evt = retry_btn.click(retry_all, [doc_state, *E, *V], [output, status, doc_state, files])
         stop.click(lambda: "⏹ 중단했습니다. 번역된 부분까지는 유지됩니다.", None, status,
                    cancels=[tr_evt, retry_evt])
 
-        # 보기
+        # 보기 — 직역 단위는 한국어 직역이 보일 때만
         gr.on([mode.change, unit.change, font.release, numbers.change, hide.change, reading.change, dict_dd.change],
               rerender, [doc_state, *V], [output, files])
+        mode.change(lambda m: gr.update(visible=m != MODE_SOURCE), mode, unit)
 
         # 줄 수정
-        load_btn.click(_edit_fields, [doc_state, line_no], edit_outputs)
+        load_btn.click(open_editor, [doc_state, line_no], [*edit_outputs, edit_bar])
         line_no.submit(_edit_fields, [doc_state, line_no], edit_outputs)
+        edit_toggle.click(lambda: gr.update(open=True), None, edit_bar)
         retrans_btn.click(retranslate_line, [doc_state, line_no, *E, *V],
                           [output, status, doc_state, files, *edit_outputs])
         save_btn.click(save_line, [doc_state, line_no, chunk_box, ko_box, sent_box, *V], [output, doc_state, files])
@@ -460,6 +517,7 @@ def build_ui() -> gr.Blocks:
 
         # 최근 번역 — 불러온 뒤 바로 번역(캐시 적중으로 즉시 표시)
         hist_load.click(load_history, hist_dd, [lyrics, title, lang, engine, model, api_key, base_url, batch]) \
+            .then(collapse_input, [lyrics, title], input_acc) \
             .then(run_translate, tr_inputs, tr_outputs)
         hist_refresh.click(refresh_history, None, hist_dd)
         hist_del.click(delete_history, hist_dd, hist_dd)
@@ -470,15 +528,7 @@ def build_ui() -> gr.Blocks:
                   [engine, model, api_key, base_url, batch, retries, *V, fb_engine, fb_model, auto_clean, hist_dd])
         gr.on([c.change for c in remembered], save_settings, remembered, settings)
 
-        # Ctrl/Cmd + Enter 로 번역
-        demo.load(None, js="""() => {
-            document.addEventListener('keydown', (e) => {
-                if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-                    const b = [...document.querySelectorAll('button')].find(x => x.innerText.trim() === '번역');
-                    if (b) { e.preventDefault(); b.click(); }
-                }
-            });
-        }""")
+        demo.load(None, js=APP_JS)
     return demo
 
 
@@ -487,4 +537,4 @@ if __name__ == "__main__":
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
     _load_dotenv()
-    build_ui().launch(server_name=os.environ.get("HOST", "127.0.0.1"))
+    build_ui().launch(server_name=os.environ.get("HOST", "127.0.0.1"), css=APP_CSS)

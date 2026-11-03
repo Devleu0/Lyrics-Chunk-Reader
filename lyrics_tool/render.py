@@ -63,7 +63,10 @@ CSS = """
 .jk-sent { margin: 0 0 .9em; padding-left: 8px; border-left: 3px solid rgba(127,127,127,.25); }
 .jk-sent .jk-line { margin: 0 0 .25em; }
 .jk-gap { height: 1.1em; }
-.jk-no { display: inline-block; min-width: 2.2em; opacity: .45; font-size: .75em; vertical-align: top; padding-top: .3em; }
+.jk-no { display: inline-block; min-width: 2.2em; opacity: .45; font-size: .75em; vertical-align: top; padding-top: .3em;
+         cursor: pointer; user-select: none; }
+.jk-no:hover { opacity: 1; text-decoration: underline; }
+.jk-empty { opacity: .6; padding: 48px 8px; text-align: center; line-height: 1.8; }
 .jk-nonum .jk-no { display: none; }
 .jk-nonum .jk-ko, .jk-nonum .jk-err { margin-left: 0; }
 .jk-nonum .jk-chunks { max-width: 100%; }
@@ -173,7 +176,8 @@ def _body(doc: Doc, mode: str, unit: str, opts: ViewOptions) -> str:
 
 def to_html(doc: Doc | None, mode: str, unit: str = UNIT_LINE, opts: ViewOptions | None = None) -> str:
     if doc is None:
-        return '<div class="jk-wrap" style="opacity:.6">번역 결과가 여기에 표시됩니다.</div>'
+        return (f'<style>{CSS}</style><div class="jk-wrap jk-empty">가사를 붙여넣고 <b>번역</b>을 누르면 여기에 표시됩니다.<br>'
+                '줄 번호를 누르면 그 줄을 고칠 수 있습니다.</div>')
     return f"<style>{CSS}</style>{_body(doc, mode, unit, opts or ViewOptions())}"
 
 
