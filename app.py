@@ -500,6 +500,54 @@ APP_JS = """() => {
         input.dispatchEvent(new Event('input', { bubbles: true }));
         setTimeout(() => document.querySelector('#jk-load-line')?.click(), 80);
     });
+    // 어구 좌클릭 = 브라우저 TTS. 휠 클릭·Ctrl+클릭은 click 이벤트가 아니거나 막지 않으므로 href의 사전이 열린다.
+    const tts = window.speechSynthesis;
+    if (!tts || typeof SpeechSynthesisUtterance === 'undefined') return;
+    const BCP47 = { en: 'en-US', ja: 'ja-JP', zh: 'zh-CN', ko: 'ko-KR', es: 'es-ES', fr: 'fr-FR', de: 'de-DE',
+                    pt: 'pt-BR', it: 'it-IT', ru: 'ru-RU', vi: 'vi-VN', th: 'th-TH', id: 'id-ID' };
+    const pickVoice = (lang) => {
+        const base = lang.split('-')[0];
+        const voices = tts.getVoices().filter(v => v.lang.replace('_', '-').toLowerCase().split('-')[0] === base);
+        const score = (v) => (/natural|neural|online|google/i.test(v.name) ? 2 : 0)
+                           + (v.lang.replace('_', '-').toLowerCase() === lang.toLowerCase() ? 1 : 0);
+        return voices.sort((a, b) => score(b) - score(a))[0] || null;
+    };
+    tts.getVoices();  // Chrome은 처음 부를 때 목록을 비동기로 채운다
+    const toast = (msg) => {
+        document.querySelector('#jk-toast')?.remove();
+        const d = Object.assign(document.createElement('div'), { id: 'jk-toast', textContent: msg });
+        d.style.cssText = 'position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:9999;'
+            + 'max-width:min(90vw,480px);padding:10px 16px;border-radius:8px;background:rgba(30,30,30,.92);'
+            + 'color:#fff;font-size:14px;box-shadow:0 4px 16px rgba(0,0,0,.3)';
+        document.body.appendChild(d);
+        setTimeout(() => d.remove(), 3500);
+    };
+    let current = null;
+    document.addEventListener('click', (e) => {
+        const el = e.target.closest('.jk-s[data-tts]');
+        if (!el || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+        e.preventDefault();
+        const wasSame = current === el && tts.speaking;
+        tts.cancel();
+        current?.classList.remove('jk-speaking');
+        current = null;
+        if (wasSame) return;  // 읽는 중에 다시 누르면 멈춤
+        const wrap = el.closest('.jk-wrap');
+        const code = wrap?.dataset.lang || '';
+        const lang = BCP47[code] || code;
+        const voice = lang && pickVoice(lang);
+        // 목록이 채워졌는데 맞는 음성이 없으면 기본 음성(다른 언어)으로 엉뚱하게 읽으므로 안내만 한다
+        if (lang && !voice && tts.getVoices().length) return toast(wrap?.dataset.noVoice || `No voice for ${lang}`);
+        const u = new SpeechSynthesisUtterance(el.dataset.tts);
+        if (lang) u.lang = lang;
+        if (voice) u.voice = voice;
+        const done = () => { el.classList.remove('jk-speaking'); if (current === el) current = null; };
+        u.onend = done;
+        u.onerror = done;
+        el.classList.add('jk-speaking');
+        current = el;
+        tts.speak(u);
+    });
 }"""
 
 

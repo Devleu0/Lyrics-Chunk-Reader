@@ -14,7 +14,7 @@ It runs on a local LLM (Ollama) or a free API (Gemini, Groq, …), and the inter
 - **Chunked reading + literal translation**: glosses each chunk in the original word order, then translates each line — or each multi-line sentence — literally.
 - **Major languages**: pick the source and target from English, Japanese, Chinese, Korean, Spanish, French, German, Portuguese, Italian, Russian, Vietnamese, Thai and Indonesian. The source language is auto-detected.
 - **Pronunciation**: furigana for Japanese, pinyin for Chinese (local analyzers, no LLM).
-- **Dictionary links**: click a chunk to open Naver Dictionary or Jisho · MDBG · Wiktionary.
+- **Listen and look up**: click a chunk to hear it (browser text-to-speech); middle-click opens Naver Dictionary or Jisho · MDBG · Wiktionary.
 - **Lyrics clean-up**: strips `[Chorus]` labels, LRC timestamps, credits and lyrics-site leftovers; opens .txt/.lrc files with encoding detection.
 - **Line editing**: click a line number to retranslate just that line or fix it by hand. Repeated choruses update together.
 - **History**: every fully translated song is kept in a list on the main screen — click it to reopen instantly, without translating again.
@@ -85,7 +85,7 @@ Switch the interface language (English / 한국어) with the buttons at the top 
 - **Fallback engine**: automatically retries only the lines the main engine failed, with another engine. It uses keys/addresses from `.env`.
 - **Retries on request failure** (default 3): on dropped connections, timeouts, rate limits (429) or overload (5xx), waits as long as the server asks (otherwise 2·4·8… s, up to 30 s) and retries. A request to wait more than a minute, or a bad request such as 400/401, is shown as an error right away.
 - **Max lines per request** (default 8): longer stanzas are split. Smaller means fewer refusals, larger means faster.
-- **Dictionary links on chunks** (Settings → Display): Naver covers Japanese, Chinese, English and Korean; other languages go to Wiktionary. A chunk is sent to the dictionary site only when you click it.
+- **Chunk audio and dictionary links** (Settings → Display): clicking a chunk reads it aloud with the voices built into your browser or OS (if a language has no voice, install one in the OS speech settings). Middle-click or Ctrl+click opens the dictionary: Naver covers Japanese, Chinese, English and Korean; other languages go to Wiktionary. A chunk is sent to the dictionary site only when you click it.
 
 ## Use it on your phone
 

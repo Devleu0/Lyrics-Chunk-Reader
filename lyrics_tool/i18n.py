@@ -45,6 +45,10 @@ S: dict[str, tuple[str, str]] = {
               "가사를 붙여넣고 <b>번역</b>을 누르면 여기에 표시됩니다.<br>줄 번호를 누르면 그 줄을 고칠 수 있습니다."),
     "pending": ("Waiting for translation…", "번역 대기 중…"),
     "dict_title": ("Look up in dictionary", "사전에서 찾기"),
+    "tts_title": ("Click to listen", "눌러서 듣기"),
+    "tts_dict_title": ("Click: listen · Middle-click: dictionary", "클릭: 듣기 · 휠 클릭: 사전"),
+    "tts_no_voice": ("No voice is installed for this language. Add one in your OS speech settings.",
+                     "이 언어의 음성이 설치되어 있지 않습니다. OS 음성 설정에서 추가해 주세요."),
     # ---- 왼쪽 사이드바
     "settings": ("Settings", "설정"),
     "acc_engine": ("Engine", "엔진"),
@@ -85,8 +89,9 @@ S: dict[str, tuple[str, str]] = {
     "font": ("Font size", "글자 크기"),
     "numbers": ("Line numbers (click to edit that line)", "줄 번호 (누르면 그 줄 수정)"),
     "dict": ("Dictionary links on chunks", "청크 사전 링크"),
-    "dict_info": ("Click a chunk's source text to open a dictionary in a new tab.",
-                  "끊어읽기 카드의 원문을 누르면 새 탭에서 사전을 엽니다."),
+    "dict_info": ("Click a chunk's source text to hear it; middle-click (or Ctrl+click) opens the dictionary "
+                  "in a new tab.",
+                  "끊어읽기 카드의 원문을 누르면 소리로 읽어 주고, 휠 클릭(또는 Ctrl+클릭)하면 새 탭에서 사전을 엽니다."),
     "dict_naver": ("Naver Dictionary", "네이버 사전"),
     "dict_intl": ("Jisho · MDBG · Wiktionary", "Jisho · MDBG · Wiktionary"),
     "dict_off": ("Off", "사용 안 함"),

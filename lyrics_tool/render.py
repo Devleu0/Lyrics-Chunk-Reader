@@ -9,7 +9,8 @@
   UNIT_SENTENCE : 여러 줄에 걸친 문장은 묶어서 한 번에 직역
 읽기 보조 (ViewOptions)
   reading    : 일본어 후리가나·중국어 병음을 원문 위에 표시
-  dictionary : 청크 원문을 누르면 외부 사전 검색
+  dictionary : 청크 원문을 휠 클릭(또는 Ctrl+클릭)하면 외부 사전 검색
+청크 원문을 좌클릭하면 브라우저 TTS로 읽는다 (화면 HTML만. 인쇄용은 링크만 둔다)
 """
 
 from __future__ import annotations
@@ -57,11 +58,12 @@ class _Ctx:
     ruby: bool
     dictionary: str
     ui: str
+    tts: bool
 
     @classmethod
-    def make(cls, doc: Doc, mode: str, opts: ViewOptions) -> "_Ctx":
+    def make(cls, doc: Doc, mode: str, opts: ViewOptions, tts: bool) -> "_Ctx":
         return cls(mode, opts.hide_translation, doc.lang, opts.reading and available(doc.lang), opts.dictionary,
-                   opts.ui)
+                   opts.ui, tts)
 
     def src(self, text: str) -> str:
         return ruby_html(text, self.lang) if self.ruby else escape(text)
@@ -93,6 +95,8 @@ CSS = """
 .jk-hide .jk-t, .jk-hide .jk-tr:not(.jk-wait) { filter: blur(5px); cursor: pointer; transition: filter .15s; outline: none; }
 .jk-wrap a.jk-s, .jk-wrap a.jk-s:visited { color: inherit !important; text-decoration: none !important; }
 .jk-wrap a.jk-s:hover, .jk-wrap a.jk-s:focus { text-decoration: underline dotted !important; }
+.jk-s[data-tts] { cursor: pointer; border-radius: 3px; }
+.jk-s.jk-speaking { background: rgba(255,170,0,.28); }
 .jk-wrap rt { font-size: .55em; font-weight: 400; opacity: .7; }
 .jk-hide .jk-t:hover, .jk-hide .jk-t:focus, .jk-hide .jk-tr:hover, .jk-hide .jk-tr:focus { filter: none; }
 """
@@ -118,11 +122,15 @@ def _tr(text: str, hide: bool) -> str:
 
 
 def _chunk_src(text: str, c: _Ctx) -> str:
+    """좌클릭은 TTS(APP_JS가 처리), 휠 클릭은 href의 사전이 새 탭으로 열린다."""
     url = dict_url(text, c.lang, c.dictionary)
+    tts = f' data-tts="{escape(text)}"' if c.tts else ""
     if not url:
-        return f'<span class="jk-s">{c.src(text)}</span>'
-    return (f'<a class="jk-s" href="{escape(url)}" target="_blank" rel="noopener noreferrer" '
-            f'title="{_t(c.ui, "dict_title")}">{c.src(text)}</a>')
+        title = f' title="{_t(c.ui, "tts_title")}"' if c.tts else ""
+        return f'<span class="jk-s"{tts}{title}>{c.src(text)}</span>'
+    title = _t(c.ui, "tts_dict_title" if c.tts else "dict_title")
+    return (f'<a class="jk-s" href="{escape(url)}" target="_blank" rel="noopener noreferrer"{tts} '
+            f'title="{title}">{c.src(text)}</a>')
 
 
 def _head(r: LineResult, c: _Ctx) -> str:
@@ -157,9 +165,9 @@ def _sentence_html(s: Sentence, lines: list[LineResult], c: _Ctx) -> str:
     return f'<div class="jk-sent">{heads}{tail}</div>'
 
 
-def _body(doc: Doc, mode: str, unit: str, opts: ViewOptions) -> str:
+def _body(doc: Doc, mode: str, unit: str, opts: ViewOptions, tts: bool = True) -> str:
     lines = doc.lines()
-    c = _Ctx.make(doc, mode, opts)
+    c = _Ctx.make(doc, mode, opts, tts)
     rows: list[str] = []
     if mode != MODE_SOURCE and unit == UNIT_SENTENCE:
         starts = {s.start: s for s in doc.sentences()}
@@ -181,7 +189,9 @@ def _body(doc: Doc, mode: str, unit: str, opts: ViewOptions) -> str:
         classes.append("jk-nonum")
     if c.hide:
         classes.append("jk-hide")
-    return f'<div class="{" ".join(classes)}" style="--jk-fs:{int(opts.font_size)}px">{"".join(rows)}</div>'
+    lang = f' data-lang="{escape(doc.lang)}" data-no-voice="{_t(opts.ui, "tts_no_voice")}"' if tts else ""
+    return (f'<div class="{" ".join(classes)}"{lang} style="--jk-fs:{int(opts.font_size)}px">'
+            f'{"".join(rows)}</div>')
 
 
 def to_html(doc: Doc | None, mode: str, unit: str = UNIT_LINE, opts: ViewOptions | None = None) -> str:
@@ -199,7 +209,7 @@ def to_print_html(doc: Doc, mode: str, unit: str, opts: ViewOptions | None, titl
         "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
         f"<title>{escape(title)}</title><style>{CSS}{PRINT_CSS}</style></head><body>"
         f"<h1>{escape(title)}</h1><div class=\"meta\">{escape(meta)}</div>"
-        f"{_body(doc, mode, unit, opts)}</body></html>"
+        f"{_body(doc, mode, unit, opts, tts=False)}</body></html>"
     )
 
 
