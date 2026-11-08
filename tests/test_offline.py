@@ -34,3 +34,19 @@ def test_offline_pack_sends_only_changes(tmp_path, monkeypatch):
 
     sent, pack = app.offline_pack(sent, *(["both"] + VIEW[1:]))  # 보기 설정이 바뀌면 전부
     assert pack["reset"] and list(pack["add"]) == [b]
+
+
+def test_offline_pack_file_skips_when_unchanged(tmp_path, monkeypatch):
+    import json
+
+    h = History(tmp_path / "h")
+    monkeypatch.setattr(app, "HISTORY", h)
+    a = _song(h, "hello", "A", 100)
+    sent, path = app.offline_pack_file(None, *VIEW)
+    pack = json.loads(open(path, encoding="utf-8").read())
+    assert list(pack["add"]) == [a]
+    sent, skip = app.offline_pack_file(sent, *VIEW)
+    assert not isinstance(skip, str)  # gr.skip(): 아무것도 보내지 않음
+    h.delete(a)
+    sent, path = app.offline_pack_file(sent, *VIEW)  # 지운 곡도 알려야 한다
+    assert json.loads(open(path, encoding="utf-8").read())["ids"] == []

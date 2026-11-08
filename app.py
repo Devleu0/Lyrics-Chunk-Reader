@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import re
 import tempfile
@@ -456,6 +458,21 @@ def offline_pack(sent, mode, unit, font, numbers, hide, reading, dictionary, ui)
     return {"view": view, "have": have}, {"reset": reset, "ids": ids, "add": add, "msg": t(opts.ui, "offline_copy")}
 
 
+def offline_pack_file(sent, *view):
+    """offline_pack 결과를 파일로 넘긴다. Gradio는 이벤트 입출력을 브라우저 localStorage(run history)에 쌓으므로
+    곡 HTML을 이벤트 값으로 직접 보내면 저장소가 금방 찬다. 파일로 보내면 거기엔 파일 주소만 남는다."""
+    new, pack = offline_pack(sent, *view)
+    if not pack["reset"] and not pack["add"] and set(new["have"]) == set((sent or {}).get("have", {})):
+        return new, gr.skip()  # 바뀐 게 없으면 보내지 않는다
+    data = json.dumps(pack, ensure_ascii=False)
+    out_dir = Path(tempfile.gettempdir()) / "lyrics-jikdok" / "offline"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / f"{hashlib.sha1(data.encode('utf-8')).hexdigest()[:16]}.json"
+    if not path.exists():
+        path.write_text(data, encoding="utf-8")
+    return new, str(path)
+
+
 # ---------------------------------------------------------------- 설정 기억
 
 
@@ -536,8 +553,16 @@ APP_JS = """() => {
         document.body.appendChild(d);
         setTimeout(() => d.remove(), 3500);
     };
-    // 오프라인 사본: 서버가 미리 보내 둔 곡별 HTML(offline_pack). 히스토리 줄을 누르면 서버 응답을 기다리지 않고
-    // 바로 뷰어에 그린다. 서버가 살아 있으면 곧이어 서버 결과가 같은 내용으로 덮어쓰고, 꺼져 있으면 이 사본이 남는다.
+    // 오프라인 사본: 서버가 미리 보내 둔 곡별 HTML(offline_pack_file). 히스토리 줄을 눌렀는데 서버가 꺼져 있으면
+    // 이 사본을 뷰어에 그린다. 서버가 살아 있으면 평소처럼 서버가 연다.
+    // 예전 버전은 곡 HTML을 이벤트 값으로 보내 Gradio run history(localStorage)를 수 MB씩 채웠다. 그 기록을 지운다.
+    try {
+        for (const k of Object.keys(localStorage)) {
+            if (k.startsWith('gradio:run-history') && localStorage.getItem(k).includes('"/offline_pack"')) {
+                localStorage.removeItem(k);
+            }
+        }
+    } catch {}
     const offline = { songs: {}, msg: '' };
     window.jkOffline = (p) => {
         if (!p) return;
@@ -561,8 +586,12 @@ APP_JS = """() => {
         const song = Object.values(offline.songs).find(s => cells.includes(s.title) && cells.includes(s.when));
         const wrap = document.querySelector('#jk-viewer .jk-wrap');
         if (!song || !wrap) return;
-        wrap.parentElement.innerHTML = song.html;
-        serverUp().then(up => { if (!up && offline.msg) toast(offline.msg); });
+        // 서버가 살아 있으면 Gradio가 그리게 둔다. 꺼졌을 때만 Gradio가 관리하는 뷰어 DOM을 직접 바꾼다.
+        serverUp().then(up => {
+            if (up) return;
+            wrap.parentElement.innerHTML = song.html;
+            if (offline.msg) toast(offline.msg);
+        });
     }, true);
     // 어구 좌클릭 = 브라우저 TTS. 휠 클릭·Ctrl+클릭은 click 이벤트가 아니거나 막지 않으므로 href의 사전이 열린다.
     const tts = window.speechSynthesis;
@@ -730,7 +759,7 @@ def build_ui() -> gr.Blocks:
             hist_ids = gr.State([])
             hist_sel = gr.State(None)
             pack_sent = gr.State(None)
-            pack = gr.JSON(visible=False)
+            pack = gr.File(visible=False)
 
             with gr.Row(elem_id="jk-toolbar"):
                 mode = L(gr.Radio(mode_choices(ui0), value=MODE_SOURCE, show_label=False, container=False),
@@ -766,8 +795,8 @@ def build_ui() -> gr.Blocks:
         stop.click(lambda u: t(u, "stopped"), ui, status, cancels=[tr_evt, retry_evt])
 
         # 보기 — 직역 단위는 직역이 보일 때만
-        gr.on([mode.change, unit.change, font.release, numbers.change, hide.change, reading.change, dict_dd.change,
-               ui.change], rerender, [doc_state, *V], [output, files])
+        view_evt = gr.on([mode.change, unit.change, font.release, numbers.change, hide.change, reading.change,
+                          dict_dd.change, ui.change], rerender, [doc_state, *V], [output, files])
         mode.change(lambda m: gr.update(visible=m != MODE_SOURCE), mode, unit)
 
         # 줄 수정
@@ -790,10 +819,12 @@ def build_ui() -> gr.Blocks:
         hist_del.click(delete_history, [hist_sel, ui], hist_sel).then(history_view, ui, H)
         ui.change(history_view, ui, H)
 
-        # 오프라인 사본 — 목록이나 보기 설정이 바뀌면 바뀐 곡의 HTML만 탭으로 보낸다 (APP_JS가 받아 둔다)
-        gr.on([hist_df.change, mode.change, unit.change, font.release, numbers.change, hide.change, reading.change,
-               dict_dd.change], offline_pack, [pack_sent, *V], [pack_sent, pack], queue=False, show_progress="hidden") \
-            .then(None, pack, None, js="(p) => { window.jkOffline?.(p); }")
+        # 오프라인 사본 — 목록이 바뀌거나 보기 설정으로 다시 그린 뒤, 바뀐 곡의 HTML만 파일로 탭에 보낸다.
+        # 보기 설정 컴포넌트의 change에 직접 걸면 Gradio에서 드롭다운 change가 끝없이 반복되므로 rerender 뒤에 잇는다.
+        pack_js = "async (f) => { if (f?.url) window.jkOffline?.(await (await fetch(f.url)).json()); }"
+        for evt in (hist_df.change, view_evt.then):
+            evt(offline_pack_file, [pack_sent, *V], [pack_sent, pack], show_progress="hidden") \
+                .then(None, pack, None, js=pack_js)
 
         # 설정 기억 (브라우저 저장소)
         remembered = [ui, target, engine, model, base_url, batch, retries, mode, unit, font, numbers, hide, reading,
