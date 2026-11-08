@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import tempfile
 import time
 from pathlib import Path
@@ -48,6 +49,25 @@ DEFAULT_SETTINGS = {
 
 CACHE: Cache | None = None
 HISTORY: History | None = None
+
+
+def settings_secret(path: Path | None = None) -> str:
+    """브라우저에 저장하는 설정(BrowserState)의 암호화 키. Gradio는 키를 주지 않으면 실행할 때마다 새로 만들어
+    앱을 다시 켜면 저장된 설정을 풀지 못하고 기본값으로 돌아간다. 한 번 만들어 파일로 두고 계속 쓴다."""
+    path = path or Path.home() / ".lyrics-jikdok" / "settings.key"
+    try:
+        key = path.read_text(encoding="utf-8").strip()
+        if key:
+            return key
+    except OSError:
+        pass
+    key = secrets.token_urlsafe(24)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(key, encoding="utf-8")
+    except OSError:
+        pass  # 저장하지 못하면 이번 실행 동안만 쓴다
+    return key
 
 
 def _load_dotenv() -> None:
@@ -669,7 +689,7 @@ def build_ui() -> gr.Blocks:
 
     with gr.Blocks(title=APP_NAME, analytics_enabled=False) as demo:  # Gradio 사용 통계 전송 끔
         doc_state = gr.State(None)
-        settings = gr.BrowserState(DEFAULT_SETTINGS, storage_key="lyrics-jikdok-settings")
+        settings = gr.BrowserState(DEFAULT_SETTINGS, storage_key="lyrics-jikdok-settings", secret=settings_secret())
 
         # ---- 왼쪽: 설정 (자주 바꾸지 않는 것)
         with L(gr.Sidebar(label=t(ui0, "settings"), open=False, width=340), label="settings"):
