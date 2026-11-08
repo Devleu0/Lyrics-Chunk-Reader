@@ -429,6 +429,33 @@ def delete_history(entry_id, ui):
     return None
 
 
+def offline_pack(sent, mode, unit, font, numbers, hide, reading, dictionary, ui):
+    """열린 탭에 히스토리 곡들의 렌더링 HTML을 미리 넘긴다. 서버가 꺼져도 그 탭에서 곡을 열 수 있게 한다.
+
+    sent(세션 상태)에 이미 보낸 곡과 저장 시각을 기억해 바뀐 곡만 보낸다. 보기 설정이 바뀌면 처음부터 다시 보낸다.
+    돌려주는 pack: {"reset": 전부 갈아엎을지, "ids": 현재 곡 id들, "add": {id: {title, when, html}}}
+    """
+    view = [mode, unit, font, numbers, hide, reading, dictionary, ui]
+    mode, unit, opts = _view(*view)
+    reset = not sent or sent.get("view") != view
+    have = {} if reset else dict(sent["have"])
+    add = {}
+    history = get_history()
+    entries = history.list()
+    for e in entries:
+        if have.get(e.id) == e.saved:
+            continue
+        try:
+            doc, _ = history.load(e.id)
+        except (OSError, KeyError, ValueError):
+            continue
+        add[e.id] = {"title": e.title, "when": e.when, "html": to_html(doc, mode, unit, opts)}
+        have[e.id] = e.saved
+    ids = [e.id for e in entries]
+    have = {k: v for k, v in have.items() if k in ids}
+    return {"view": view, "have": have}, {"reset": reset, "ids": ids, "add": add, "msg": t(opts.ui, "offline_copy")}
+
+
 # ---------------------------------------------------------------- 설정 기억
 
 
@@ -500,6 +527,43 @@ APP_JS = """() => {
         input.dispatchEvent(new Event('input', { bubbles: true }));
         setTimeout(() => document.querySelector('#jk-load-line')?.click(), 80);
     });
+    const toast = (msg) => {
+        document.querySelector('#jk-toast')?.remove();
+        const d = Object.assign(document.createElement('div'), { id: 'jk-toast', textContent: msg });
+        d.style.cssText = 'position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:9999;'
+            + 'max-width:min(90vw,480px);padding:10px 16px;border-radius:8px;background:rgba(30,30,30,.92);'
+            + 'color:#fff;font-size:14px;box-shadow:0 4px 16px rgba(0,0,0,.3)';
+        document.body.appendChild(d);
+        setTimeout(() => d.remove(), 3500);
+    };
+    // 오프라인 사본: 서버가 미리 보내 둔 곡별 HTML(offline_pack). 히스토리 줄을 누르면 서버 응답을 기다리지 않고
+    // 바로 뷰어에 그린다. 서버가 살아 있으면 곧이어 서버 결과가 같은 내용으로 덮어쓰고, 꺼져 있으면 이 사본이 남는다.
+    const offline = { songs: {}, msg: '' };
+    window.jkOffline = (p) => {
+        if (!p) return;
+        if (p.reset) offline.songs = {};
+        Object.assign(offline.songs, p.add || {});
+        const keep = new Set(p.ids || []);
+        for (const id of Object.keys(offline.songs)) if (!keep.has(id)) delete offline.songs[id];
+        offline.msg = p.msg || offline.msg;
+    };
+    const serverUp = async () => {
+        const ctl = new AbortController();
+        const timer = setTimeout(() => ctl.abort(), 1500);
+        try { return (await fetch('config', { cache: 'no-store', signal: ctl.signal })).ok; }
+        catch { return false; }
+        finally { clearTimeout(timer); }
+    };
+    document.addEventListener('click', (e) => {
+        const row = e.target.closest('#jk-history-table [role=row], #jk-history-table tbody tr');
+        if (!row) return;
+        const cells = [...row.querySelectorAll('[role=gridcell], td')].map(td => td.textContent.trim());
+        const song = Object.values(offline.songs).find(s => cells.includes(s.title) && cells.includes(s.when));
+        const wrap = document.querySelector('#jk-viewer .jk-wrap');
+        if (!song || !wrap) return;
+        wrap.parentElement.innerHTML = song.html;
+        serverUp().then(up => { if (!up && offline.msg) toast(offline.msg); });
+    }, true);
     // 어구 좌클릭 = 브라우저 TTS. 휠 클릭·Ctrl+클릭은 click 이벤트가 아니거나 막지 않으므로 href의 사전이 열린다.
     const tts = window.speechSynthesis;
     if (!tts || typeof SpeechSynthesisUtterance === 'undefined') return;
@@ -513,15 +577,6 @@ APP_JS = """() => {
         return voices.sort((a, b) => score(b) - score(a))[0] || null;
     };
     tts.getVoices();  // Chrome은 처음 부를 때 목록을 비동기로 채운다
-    const toast = (msg) => {
-        document.querySelector('#jk-toast')?.remove();
-        const d = Object.assign(document.createElement('div'), { id: 'jk-toast', textContent: msg });
-        d.style.cssText = 'position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:9999;'
-            + 'max-width:min(90vw,480px);padding:10px 16px;border-radius:8px;background:rgba(30,30,30,.92);'
-            + 'color:#fff;font-size:14px;box-shadow:0 4px 16px rgba(0,0,0,.3)';
-        document.body.appendChild(d);
-        setTimeout(() => d.remove(), 3500);
-    };
     let current = null;
     document.addEventListener('click', (e) => {
         const el = e.target.closest('.jk-s[data-tts]');
@@ -674,6 +729,8 @@ def build_ui() -> gr.Blocks:
                              value="hist_delete_current")
             hist_ids = gr.State([])
             hist_sel = gr.State(None)
+            pack_sent = gr.State(None)
+            pack = gr.JSON(visible=False)
 
             with gr.Row(elem_id="jk-toolbar"):
                 mode = L(gr.Radio(mode_choices(ui0), value=MODE_SOURCE, show_label=False, container=False),
@@ -732,6 +789,11 @@ def build_ui() -> gr.Blocks:
                        [output, status, doc_state, files, hist_sel, lyrics, title, lang, target, input_acc, hist_acc])
         hist_del.click(delete_history, [hist_sel, ui], hist_sel).then(history_view, ui, H)
         ui.change(history_view, ui, H)
+
+        # 오프라인 사본 — 목록이나 보기 설정이 바뀌면 바뀐 곡의 HTML만 탭으로 보낸다 (APP_JS가 받아 둔다)
+        gr.on([hist_df.change, mode.change, unit.change, font.release, numbers.change, hide.change, reading.change,
+               dict_dd.change], offline_pack, [pack_sent, *V], [pack_sent, pack], queue=False, show_progress="hidden") \
+            .then(None, pack, None, js="(p) => { window.jkOffline?.(p); }")
 
         # 설정 기억 (브라우저 저장소)
         remembered = [ui, target, engine, model, base_url, batch, retries, mode, unit, font, numbers, hide, reading,

@@ -47,6 +47,9 @@ S: dict[str, tuple[str, str]] = {
     "dict_title": ("Look up in dictionary", "사전에서 찾기"),
     "tts_title": ("Click to listen", "눌러서 듣기"),
     "tts_dict_title": ("Click: listen · Middle-click: dictionary", "클릭: 듣기 · 휠 클릭: 사전"),
+    "offline_copy": ("The app server is off, so this is the copy saved in this tab. Restart the app to edit or "
+                     "translate.",
+                     "앱 서버가 꺼져 있어 이 탭에 받아 둔 사본을 보여 줍니다. 수정하거나 번역하려면 앱을 다시 켜 주세요."),
     "tts_no_voice": ("No voice is installed for this language. Add one in your OS speech settings.",
                      "이 언어의 음성이 설치되어 있지 않습니다. OS 음성 설정에서 추가해 주세요."),
     # ---- 왼쪽 사이드바
