@@ -151,7 +151,9 @@ S: dict[str, tuple[str, str]] = {
     "fmt_json": ("JSON", "JSON"),
     # ---- 모바일 HTML
     "m_toc": ("Contents", "목차"),
-    "m_toc_count": ("{n} songs", "{n}곡"),
+    "m_close": ("Close", "닫기"),
+    "m_prev": ("Previous", "이전 곡"),
+    "m_next": ("Next", "다음 곡"),
     "m_lines_suffix": (" lines", "줄"),
     "m_mode_source": ("Chunks", "끊어읽기"),
     "m_mode_target": ("Literal", "직역"),
