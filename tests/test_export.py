@@ -31,12 +31,14 @@ def test_mobile_html_holds_all_modes_and_toc():
     page = to_mobile_html([(d, "meta") for d in docs], MODE_BOTH, UNIT_SENTENCE, ViewOptions(ui="ko"), "Book")
     assert page.startswith("<!doctype html>") and 'name="viewport"' in page and 'data-mode="both"' in page
     assert page.count('class="m-song"') == 2 and 'href="#song-2"' in page and "목차" in page
+    assert '<details class="m-tocbox" id="m-toc" open>' in page and 'class="m-book" href="#m-toc"' in page
     for m in ("source", "target", "both"):
         assert page.count(f'class="m-mode" data-mode="{m}"') == 2
     assert "S[I wait &gt; you]" in page  # 문장 단위 직역
     assert "data-tts=" in page and "speechSynthesis" in page and "prefers-color-scheme: dark" in page
     single = to_mobile_html([(docs[0], "m")], MODE_SOURCE, UNIT_SENTENCE, None, "One")
-    assert "m-toc" not in single.split("</style>")[1]
+    markup = single.split("<script>")[0]  # 곡이 하나면 목차도, 목차로 가는 링크도 없다
+    assert 'id="m-toc"' not in markup and 'href="#m-toc"' not in markup
 
 
 def test_image_html_is_self_contained():
