@@ -14,7 +14,7 @@ It runs on a local LLM (Ollama) or a free API (Gemini, Groq, …), and the inter
 - **Chunked reading + literal translation**: glosses each chunk in the original word order, then translates each line — or each multi-line sentence — literally.
 - **Major languages**: pick the source and target from English, Japanese, Chinese, Korean, Spanish, French, German, Portuguese, Italian, Russian, Vietnamese, Thai and Indonesian. The source language is auto-detected.
 - **Pronunciation**: furigana for Japanese, pinyin for Chinese (local analyzers, no LLM).
-- **Listen and look up**: click a chunk to hear it (browser text-to-speech); middle-click opens Naver Dictionary or Jisho · MDBG · Wiktionary.
+- **Listen in the original language**: hear a chunk, a line (▶) or the whole song read by natural neural voices, slowed down if you like, with pauses to repeat after it; export it as MP3 (whole song + one file per line). See [Listen](#listen). Middle-click a chunk opens Naver Dictionary or Jisho · MDBG · Wiktionary.
 - **Lyrics clean-up**: strips `[Chorus]` labels, LRC timestamps, credits and lyrics-site leftovers; opens .txt/.lrc files with encoding detection.
 - **Line editing**: click a line number to retranslate just that line or fix it by hand. Repeated choruses update together.
 - **History**: every fully translated song is kept in a list on the main screen — click it to reopen instantly, without translating again.
@@ -85,7 +85,7 @@ Switch the interface language (English / 한국어) with the buttons at the top 
 - **Fallback engine**: automatically retries only the lines the main engine failed, with another engine. It uses keys/addresses from `.env`.
 - **Retries on request failure** (default 3): on dropped connections, timeouts, rate limits (429) or overload (5xx), waits as long as the server asks (otherwise 2·4·8… s, up to 30 s) and retries. A request to wait more than a minute, or a bad request such as 400/401, is shown as an error right away.
 - **Max lines per request** (default 8): longer stanzas are split. Smaller means fewer refusals, larger means faster.
-- **Chunk audio and dictionary links** (Settings → Display): clicking a chunk reads it aloud with the voices built into your browser or OS (if a language has no voice, install one in the OS speech settings). Middle-click or Ctrl+click opens the dictionary: Naver covers Japanese, Chinese, English and Korean; other languages go to Wiktionary. A chunk is sent to the dictionary site only when you click it.
+- **Dictionary links** (Settings → Display): clicking a chunk reads it aloud (see [Listen](#listen)). Middle-click or Ctrl+click opens the dictionary: Naver covers Japanese, Chinese, English and Korean; other languages go to Wiktionary. A chunk is sent to the dictionary site only when you click it.
 
 ## Use it on your phone
 
@@ -99,8 +99,18 @@ Under **Settings → Export**. Every file follows the current view settings (vie
 
 - **Open song**: mobile HTML · printable HTML · Markdown · JSON are ready to download as soon as a song is shown.
 - **🖼 Save as image (PNG)**: draws the open song as one long image, at phone width or wide, light or dark. Your browser draws it with its own fonts (no extra libraries, works offline), so pronunciation and chunk cards look like the screen. Hidden translations are shown in the image.
-- **Mobile HTML**: one self-contained file for reading on a phone. A bar at the top switches between chunks / literal / both, hides meanings for self-testing (tap a meaning to peek), and changes the text size; your choices are remembered on that phone. Tap a chunk to hear it; long-press it to open the dictionary link. Follows the phone's dark mode.
+- **Mobile HTML**: one self-contained file for reading on a phone. A bar at the top switches between chunks / literal / both, hides meanings for self-testing (tap a meaning to peek), and changes the text size; your choices are remembered on that phone. Each lyric line stays on one row: long lines get tighter and smaller, and only lines that would drop below 60% wrap. Tap a chunk or a line's ▶ to hear it, or **▶ Listen** to read the song line by line (**Repeat gaps** leaves time to repeat each line) — this uses the phone's own voices. Long-press a chunk to open the dictionary link. Follows the phone's dark mode.
+- **🎧 Make MP3**: the open song read in the original language — one MP3 of the whole song and a ZIP with one MP3 per line (`01_first words.mp3` …), using the Listen settings.
 - **Several songs at once**: pick songs from your saved history (in the order you want, or **Select all**) and the formats. Mobile HTML puts every song into one file with a table of contents; the other formats go into a ZIP with one folder per song. Songs are exported as saved — nothing is translated again.
+
+## Listen
+
+Hear the **original lyrics** to compare your pronunciation.
+
+- **Chunk**: click its text. **Line**: click ▶ next to the line number. **Whole song**: **🔊 Listen to all** in the toolbar opens a player at the bottom and highlights the line being read.
+- **Settings → 🔊 Listen**: female / male voice, speed (0.5–1.5×), and the pause between lines for the whole song — short, 1.5 s, or **time to repeat** (as long as the line itself, plus half a second).
+- Voices: Microsoft Edge's online neural voices via [edge-tts](https://github.com/rany2/edge-tts) (`pip install edge-tts`, included in `requirements.txt`). The original lyrics are sent to Microsoft and an internet connection is needed. Each line is made once and cached, so replays are instant (the first whole song takes several seconds).
+- The mobile HTML can't call the app, so there it reads with the phone's own voices.
 
 ## History
 
@@ -142,6 +152,7 @@ lyrics_tool/
   reading.py            pronunciation (furigana, pinyin), dictionary links
   render.py             HTML/Markdown rendering per view mode and unit (screen, print, mobile, image)
   export.py             export files for one song or several (ZIP, mobile book)
+  speech.py             original-language audio (edge-tts), MP3 joining, per-line timings
 tests/                  tests with a fake engine (python -m pytest)
 start.bat               Windows launcher (checks Ollama → starts the app → opens the browser)
 ```

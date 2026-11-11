@@ -22,7 +22,7 @@ def test_offline_pack_sends_only_changes(tmp_path, monkeypatch):
     sent, pack = app.offline_pack(None, *VIEW)
     assert pack["reset"] and pack["ids"] == [b, a] and set(pack["add"]) == {a, b}
     assert pack["add"][a]["title"] == "A" and 'class="jk-s"' in pack["add"][a]["html"]
-    assert pack["msg"].startswith("앱 서버가 꺼져") and 'class="jk-wrap" data-lang' in pack["add"][a]["html"]
+    assert pack["msg"].startswith("앱 서버가 꺼져") and 'class="jk-wrap jk-tts" data-lang' in pack["add"][a]["html"]
 
     sent, pack = app.offline_pack(sent, *VIEW)  # 그대로면 아무것도 다시 보내지 않는다
     assert not pack["reset"] and pack["add"] == {}
