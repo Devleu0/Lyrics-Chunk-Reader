@@ -339,6 +339,8 @@ FIT_CSS = """
 .jk-chunks.jk-tight { gap: .12em; }
 .jk-tight .jk-chunk { padding: .15em .22em; }
 .jk-chunks.jk-multi { flex-wrap: wrap; overflow-x: visible; }
+.jk-multi .jk-chunk { flex: 0 1 auto; min-width: 0; max-width: 100%; white-space: normal;
+                     word-break: keep-all; overflow-wrap: anywhere; }
 .jk-src.jk-multi { white-space: normal; overflow-x: visible; }
 """
 
