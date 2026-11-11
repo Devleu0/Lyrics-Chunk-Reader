@@ -12,7 +12,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import re
 import secrets
 import tempfile
 import time
@@ -33,8 +32,10 @@ from lyrics_tool.core import (
 from lyrics_tool.i18n import UI_LANGS, pick_ui, t
 from lyrics_tool.langs import LANGS, detect_language, lang_name
 from lyrics_tool.reading import DICT_INTL, DICT_NAVER, DICTS
+from lyrics_tool.export import FMT_MOBILE, FORMATS, safe_name, song_meta, write_bundle, write_song
 from lyrics_tool.render import (
-    MODE_SOURCE, MODES, UNIT_LINE, UNITS, ViewOptions, mode_label, to_html, to_markdown, to_print_html, unit_label,
+    FIT_JS, IMAGE_WIDTHS, MODE_SOURCE, MODES, TTS_JS, UNIT_LINE, UNITS, ViewOptions, mode_label, to_html, to_image_html,
+    unit_label,
 )
 
 APP_NAME = "Lyrics Chunk Reader"
@@ -179,27 +180,60 @@ def _status_line(doc: Doc, ui: str, engine_name: str, model: str, note: str = ""
     return " · ".join(p for p in parts if p) + (f"\n\n{note}" if note else "")
 
 
-def _safe(name: str) -> str:
-    return re.sub(r'[\\/:*?"<>|\s]+', "_", name).strip("_")[:40] or "lyrics"
+EXPORT_DIR = Path(tempfile.gettempdir()) / "lyrics-jikdok"
 
 
 def _export(doc: Doc | None, mode, unit, opts: ViewOptions) -> list[str] | None:
+    """지금 연 곡의 파일: 모바일 HTML · 인쇄용 HTML · Markdown · JSON"""
     if doc is None:
         return None
-    out_dir = Path(tempfile.gettempdir()) / "lyrics-jikdok"
-    out_dir.mkdir(exist_ok=True)
-    base = _safe(doc.title)
-    tag = mode if mode == MODE_SOURCE else f"{mode}-{unit}"
-    md = out_dir / f"{base}_{tag}.md"
-    html = out_dir / f"{base}_{tag}_print.html"
-    js = out_dir / f"{base}_data.json"
+    return write_song(doc, mode, unit, opts, EXPORT_DIR)
+
+
+def format_choices(ui):
+    return [(t(ui, f"fmt_{f}"), f) for f in FORMATS]
+
+
+def export_many(ids, formats, *view):
+    """히스토리에서 고른 곡들을 한꺼번에 내보낸다 (저장된 결과 그대로, 엔진을 부르지 않음)."""
+    mode, unit, opts = _view(*view)
     ui = opts.ui
-    md.write_text(to_markdown(doc, mode, unit, opts), encoding="utf-8")
-    meta = (f"{lang_name(doc.lang, ui)} → {lang_name(doc.target, ui)} · {mode_label(mode, ui)} · "
-            f"{unit_label(unit, ui)}")
-    html.write_text(to_print_html(doc, mode, unit, opts, doc.title or t(ui, "app_title"), meta), encoding="utf-8")
-    js.write_text(doc.to_json(), encoding="utf-8")
-    return [str(md), str(html), str(js)]
+    if not ids:
+        raise gr.Error(t(ui, "many_pick"))
+    if not formats:
+        raise gr.Error(t(ui, "many_no_format"))
+    docs = []
+    for entry_id in ids:
+        try:
+            docs.append(get_history().load(entry_id)[0])
+        except (OSError, KeyError, ValueError):
+            continue  # 그 사이 지워진 곡은 건너뛴다
+    if not docs:
+        raise gr.Error(t(ui, "history_missing"))
+    name = docs[0].title if len(docs) == 1 else t(ui, "many_book", n=len(docs), date=time.strftime("%Y-%m-%d"))
+    paths = write_bundle(docs, mode, unit, opts, formats, EXPORT_DIR / "batch", name)
+    gr.Info(t(ui, "many_done", n=len(docs)))
+    return paths
+
+
+def image_source(doc, width, dark, *view):
+    """이미지로 그릴 조각 HTML을 파일로 넘긴다. 실제 그리기는 브라우저(IMAGE_JS)가 한다.
+    값으로 직접 보내면 Gradio run history(localStorage)에 곡 HTML이 쌓이므로 offline_pack_file처럼 파일로 보낸다."""
+    mode, unit, opts = _view(*view)
+    ui = opts.ui
+    if doc is None:
+        raise gr.Error(t(ui, "err_run_first"))
+    title = doc.title or t(ui, "app_title")
+    html = to_image_html(doc, mode, unit, opts, title, song_meta(doc, mode, unit, ui), width, bool(dark))
+    data = json.dumps({"html": html, "width": IMAGE_WIDTHS.get(width, IMAGE_WIDTHS["phone"]),
+                       "name": f"{safe_name(doc.title)}_{mode}{'_dark' if dark else ''}.png",
+                       "fail": t(ui, "image_fail")}, ensure_ascii=False)
+    out_dir = EXPORT_DIR / "image"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / f"{hashlib.sha1(data.encode('utf-8')).hexdigest()[:16]}.json"
+    if not path.exists():
+        path.write_text(data, encoding="utf-8")
+    return str(path)
 
 
 def history_dir_label() -> str:
@@ -214,15 +248,16 @@ def history_dir_label() -> str:
 
 
 def history_view(ui, current_title=""):
-    """(표, 행별 id, 히스토리 칸 update)"""
+    """(표, 행별 id, 히스토리 칸, 빈 목록 안내, 여러 곡 내보내기 목록 update)"""
     entries = get_history().list()
+    picks = [(f"{e.title} · {lang_name(e.lang, ui)}→{lang_name(e.target, ui)} · {e.when}", e.id) for e in entries]
     cols = [t(ui, k) for k in ("col_title", "col_langs", "col_lines", "col_model", "col_saved")]
     rows = [[e.title, f"{lang_name(e.lang, ui)} → {lang_name(e.target, ui)}", e.lines, e.model, e.when]
             for e in entries]
     label = t(ui, "history_current", n=len(entries), title=current_title) if current_title \
         else t(ui, "history_count", n=len(entries))
     return (gr.update(value=pd.DataFrame(rows, columns=cols), visible=bool(entries)), [e.id for e in entries],
-            gr.update(label=label), gr.update(visible=not entries))
+            gr.update(label=label), gr.update(visible=not entries), gr.update(choices=picks))
 
 
 def _save_history(doc: Doc, engine, model, batch, ui) -> str:
@@ -540,9 +575,9 @@ APP_CSS = """
 #jk-toolbar { position: sticky; top: 0; z-index: 20; background: var(--body-background-fill);
               padding: 6px 2px; border-bottom: 1px solid var(--border-color-primary);
               gap: 6px 12px; align-items: center; flex-wrap: wrap; }
-#jk-toolbar > *, #jk-input-opts > * { flex: 0 1 auto !important; width: auto !important; min-width: 0 !important;
+#jk-toolbar > *, #jk-input-opts > *, #jk-img-opts > * { flex: 0 1 auto !important; width: auto !important; min-width: 0 !important;
                                       max-width: 100%; }  /* 폰에서 라디오 묶음이 넘치지 않고 줄바꿈 */
-#jk-input-opts { flex-wrap: wrap; gap: 6px 12px; align-items: center; }
+#jk-input-opts, #jk-img-opts { flex-wrap: wrap; gap: 6px 12px; align-items: center; }
 #jk-status { font-size: .85em; opacity: .85; min-height: 1.4em; }
 #jk-status p { margin: 2px 0; }
 #jk-viewer { padding: 4px 2px 64px; }
@@ -613,45 +648,57 @@ APP_JS = """() => {
             if (offline.msg) toast(offline.msg);
         });
     }, true);
-    // 어구 좌클릭 = 브라우저 TTS. 휠 클릭·Ctrl+클릭은 click 이벤트가 아니거나 막지 않으므로 href의 사전이 열린다.
-    const tts = window.speechSynthesis;
-    if (!tts || typeof SpeechSynthesisUtterance === 'undefined') return;
-    const BCP47 = { en: 'en-US', ja: 'ja-JP', zh: 'zh-CN', ko: 'ko-KR', es: 'es-ES', fr: 'fr-FR', de: 'de-DE',
-                    pt: 'pt-BR', it: 'it-IT', ru: 'ru-RU', vi: 'vi-VN', th: 'th-TH', id: 'id-ID' };
-    const pickVoice = (lang) => {
-        const base = lang.split('-')[0];
-        const voices = tts.getVoices().filter(v => v.lang.replace('_', '-').toLowerCase().split('-')[0] === base);
-        const score = (v) => (/natural|neural|online|google/i.test(v.name) ? 2 : 0)
-                           + (v.lang.replace('_', '-').toLowerCase() === lang.toLowerCase() ? 1 : 0);
-        return voices.sort((a, b) => score(b) - score(a))[0] || null;
-    };
-    tts.getVoices();  // Chrome은 처음 부를 때 목록을 비동기로 채운다
-    let current = null;
-    document.addEventListener('click', (e) => {
-        const el = e.target.closest('.jk-s[data-tts]');
-        if (!el || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
-        e.preventDefault();
-        const wasSame = current === el && tts.speaking;
-        tts.cancel();
-        current?.classList.remove('jk-speaking');
-        current = null;
-        if (wasSame) return;  // 읽는 중에 다시 누르면 멈춤
-        const wrap = el.closest('.jk-wrap');
-        const code = wrap?.dataset.lang || '';
-        const lang = BCP47[code] || code;
-        const voice = lang && pickVoice(lang);
-        // 목록이 채워졌는데 맞는 음성이 없으면 기본 음성(다른 언어)으로 엉뚱하게 읽으므로 안내만 한다
-        if (lang && !voice && tts.getVoices().length) return toast(wrap?.dataset.noVoice || `No voice for ${lang}`);
-        const u = new SpeechSynthesisUtterance(el.dataset.tts);
-        if (lang) u.lang = lang;
-        if (voice) u.voice = voice;
-        const done = () => { el.classList.remove('jk-speaking'); if (current === el) current = null; };
-        u.onend = done;
-        u.onerror = done;
-        el.classList.add('jk-speaking');
-        current = el;
-        tts.speak(u);
-    });
+    // 어구 좌클릭 = 브라우저 TTS (render.TTS_JS)
+    (""" + TTS_JS + """)(toast);
+}"""
+
+# 이미지로 저장: image_source가 넘긴 조각 HTML을 숨긴 iframe에서 재어 높이를 구하고, SVG foreignObject로 감싸
+# 캔버스에 그린 뒤 PNG로 내려받는다. 외부 라이브러리 없이 브라우저만으로 그리므로 오프라인에서도 된다.
+# 캔버스 한계(iOS는 약 1600만 화소, 한 변 3만 2천 화소)를 넘지 않게 배율을 줄인다.
+IMAGE_JS = """async (f) => {
+    if (!f?.url) return;
+    const p = await (await fetch(f.url)).json();
+    const frame = document.createElement('iframe');
+    frame.style.cssText = `position:fixed;left:-20000px;top:0;width:${p.width}px;height:100px;border:0;`;
+    document.body.appendChild(frame);
+    try {
+        const d = frame.contentDocument;
+        d.open();
+        d.write('<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0">' + p.html
+                + '</body></html>');
+        d.close();
+        await d.fonts?.ready;
+        (""" + FIT_JS + """)(d);  // 한 줄이 폭을 넘으면 그 줄만 줄인다 (render.FIT_CSS)
+        const node = d.body.firstElementChild;
+        const w = p.width, h = Math.ceil(node.getBoundingClientRect().height);
+        const xhtml = new XMLSerializer().serializeToString(node);
+        const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">`
+                  + `<foreignObject x="0" y="0" width="${w}" height="${h}">${xhtml}</foreignObject></svg>`;
+        const img = new Image();
+        await new Promise((ok, bad) => {
+            img.onload = ok; img.onerror = bad;
+            img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+        });
+        const scale = Math.max(0.5, Math.min(2, Math.sqrt(16e6 / (w * h)), 32000 / h));
+        const c = document.createElement('canvas');
+        c.width = Math.round(w * scale);
+        c.height = Math.round(h * scale);
+        const ctx = c.getContext('2d');
+        ctx.scale(scale, scale);
+        ctx.drawImage(img, 0, 0, w, h);
+        const blob = await new Promise(r => c.toBlob(r, 'image/png'));
+        if (!blob) throw new Error('empty canvas');
+        const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: p.name });
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    } catch (e) {
+        console.error(e);
+        alert(p.fail);
+    } finally {
+        frame.remove();
+    }
 }"""
 
 
@@ -693,7 +740,7 @@ def build_ui() -> gr.Blocks:
 
         # ---- 왼쪽: 설정 (자주 바꾸지 않는 것)
         with L(gr.Sidebar(label=t(ui0, "settings"), open=False, width=340), label="settings"):
-            with L(gr.Accordion(t(ui0, "acc_engine"), open=True), label="acc_engine"):
+            with L(gr.Accordion(t(ui0, "acc_engine"), open=False), label="acc_engine"):
                 engine = L(gr.Radio(engine_choices(ui0), value=default_engine, label=t(ui0, "engine")),
                            label="engine", choices=engine_choices)
                 model = gr.Dropdown([], value="", label=t(ui0, "model"), info=model_info, allow_custom_value=True)
@@ -723,7 +770,26 @@ def build_ui() -> gr.Blocks:
                                         info=t(ui0, "dict_info")),
                             label="dict", info="dict_info", choices=dict_choices)
             with L(gr.Accordion(t(ui0, "acc_export"), open=True), label="acc_export"):
+                L(gr.Markdown(t(ui0, "exp_current")), value="exp_current")
                 files = L(gr.File(label=t(ui0, "files"), file_count="multiple"), label="files")
+                with gr.Row(elem_id="jk-img-opts"):
+                    img_width = L(gr.Radio([(t(ui0, "img_phone"), "phone"), (t(ui0, "img_wide"), "wide")],
+                                           value="phone", show_label=False, container=False),
+                                  choices=lambda u: [(t(u, "img_phone"), "phone"), (t(u, "img_wide"), "wide")])
+                    img_dark = L(gr.Checkbox(False, label=t(ui0, "img_dark"), container=False),
+                                 label="img_dark")
+                img_btn = L(gr.Button(t(ui0, "img_save"), size="sm"), value="img_save")
+                img_src = gr.File(visible=False)
+                L(gr.Markdown(t(ui0, "exp_many")), value="exp_many")
+                many = L(gr.Dropdown([], value=[], multiselect=True, allow_custom_value=True,
+                                     label=t(ui0, "many_songs"), info=t(ui0, "many_info")),
+                         label="many_songs", info="many_info")
+                many_fmt = L(gr.CheckboxGroup(format_choices(ui0), value=[FMT_MOBILE], label=t(ui0, "many_formats")),
+                             label="many_formats", choices=format_choices)
+                with gr.Row():
+                    many_all = L(gr.Button(t(ui0, "many_all"), size="sm"), value="many_all")
+                    many_btn = L(gr.Button(t(ui0, "many_export"), size="sm", variant="primary"), value="many_export")
+                many_files = L(gr.File(label=t(ui0, "many_files"), file_count="multiple"), label="many_files")
 
         # ---- 오른쪽: 줄 수정 (뷰어의 줄 번호를 누르면 열림)
         with L(gr.Sidebar(label=t(ui0, "edit"), open=False, position="right", width=380), label="edit") as edit_bar:
@@ -797,7 +863,7 @@ def build_ui() -> gr.Blocks:
         edit_outputs = [edit_info, chunk_box, tr_box, sent_box]
         tr_inputs = [lyrics, title, lang, target, auto_clean, *E, fb_engine, fb_model, force, *V]
         tr_outputs = [lyrics, output, status, doc_state, files]
-        H = [hist_df, hist_ids, hist_acc, hist_empty]
+        H = [hist_df, hist_ids, hist_acc, hist_empty, many]
 
         # UI 언어 — 모든 라벨을 다시 그리고 뷰어도 다시 렌더링
         ui.change(lambda u, eng: [f(u, eng) for _, f in relabels], [ui, engine], [c for c, _ in relabels])
@@ -838,6 +904,12 @@ def build_ui() -> gr.Blocks:
                        [output, status, doc_state, files, hist_sel, lyrics, title, lang, target, input_acc, hist_acc])
         hist_del.click(delete_history, [hist_sel, ui], hist_sel).then(history_view, ui, H)
         ui.change(history_view, ui, H)
+
+        # 내보내기 — 이미지는 브라우저가 그린다. 여러 곡은 히스토리에 저장된 결과로 만든다
+        img_btn.click(image_source, [doc_state, img_width, img_dark, *V], img_src, show_progress="hidden") \
+            .success(None, img_src, None, js=IMAGE_JS)
+        many_all.click(lambda ids: list(ids), hist_ids, many)
+        many_btn.click(export_many, [many, many_fmt, *V], many_files)
 
         # 오프라인 사본 — 목록이 바뀌거나 보기 설정으로 다시 그린 뒤, 바뀐 곡의 HTML만 파일로 탭에 보낸다.
         # 보기 설정 컴포넌트의 change에 직접 걸면 Gradio에서 드롭다운 change가 끝없이 반복되므로 rerender 뒤에 잇는다.

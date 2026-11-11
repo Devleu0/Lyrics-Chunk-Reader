@@ -18,7 +18,7 @@ It runs on a local LLM (Ollama) or a free API (Gemini, Groq, …), and the inter
 - **Lyrics clean-up**: strips `[Chorus]` labels, LRC timestamps, credits and lyrics-site leftovers; opens .txt/.lrc files with encoding detection.
 - **Line editing**: click a line number to retranslate just that line or fix it by hand. Repeated choruses update together.
 - **History**: every fully translated song is kept in a list on the main screen — click it to reopen instantly, without translating again.
-- **Export**: Markdown (for review), printable HTML (save as PDF), JSON.
+- **Export**: mobile HTML (easy reading on a phone), printable HTML (save as PDF), Markdown, JSON, and a PNG image of the view. Several saved songs can be exported at once (see [Export](#export)).
 - **Works on your phone** over the same Wi-Fi.
 
 ## Quick start
@@ -76,7 +76,7 @@ For API keys or a default engine, copy `.env.example` to `.env` and fill in what
 
    ![Edit line panel](docs/images/edit-en.png)
 
-4. Download results as Markdown, printable HTML or JSON under **Settings → Export**. Reopen past songs from **📚 Recent translations** below the lyrics box (see [History](#history)).
+4. Download results under **Settings → Export** — as files, as an image, or several songs at once (see [Export](#export)). Reopen past songs from **📚 Recent translations** below the lyrics box (see [History](#history)).
 
 Switch the interface language (English / 한국어) with the buttons at the top right. It starts in your browser's language. Engine, model and view settings are remembered in the browser (API keys are never saved, so put them in `.env`).
 
@@ -92,6 +92,15 @@ Switch the interface language (English / 한국어) with the buttons at the top 
 Run `HOST=0.0.0.0 python app.py` on your PC (PowerShell: `$env:HOST = "0.0.0.0"` then `.venv\Scripts\python.exe app.py`) and open `http://<your PC's IP>:7860` in your phone's browser on the same Wi-Fi. Anyone on the network can connect, so don't do this on public Wi-Fi.
 
 <img src="docs/images/mobile-en.png" alt="Phone view" width="300">
+
+## Export
+
+Under **Settings → Export**. Every file follows the current view settings (view mode, literal unit, pronunciation, line numbers).
+
+- **Open song**: mobile HTML · printable HTML · Markdown · JSON are ready to download as soon as a song is shown.
+- **🖼 Save as image (PNG)**: draws the open song as one long image, at phone width or wide, light or dark. Your browser draws it with its own fonts (no extra libraries, works offline), so pronunciation and chunk cards look like the screen. Hidden translations are shown in the image.
+- **Mobile HTML**: one self-contained file for reading on a phone. A bar at the top switches between chunks / literal / both, hides meanings for self-testing (tap a meaning to peek), and changes the text size; your choices are remembered on that phone. Tap a chunk to hear it; long-press it to open the dictionary link. Follows the phone's dark mode.
+- **Several songs at once**: pick songs from your saved history (in the order you want, or **Select all**) and the formats. Mobile HTML puts every song into one file with a table of contents; the other formats go into a ZIP with one folder per song. Songs are exported as saved — nothing is translated again.
 
 ## History
 
@@ -131,7 +140,8 @@ lyrics_tool/
   history.py            translation history, one JSON file per song in history/
   cleanup.py            lyrics clean-up, TXT/LRC reading with encoding detection
   reading.py            pronunciation (furigana, pinyin), dictionary links
-  render.py             HTML/Markdown rendering per view mode and unit
+  render.py             HTML/Markdown rendering per view mode and unit (screen, print, mobile, image)
+  export.py             export files for one song or several (ZIP, mobile book)
 tests/                  tests with a fake engine (python -m pytest)
 start.bat               Windows launcher (checks Ollama → starts the app → opens the browser)
 ```
