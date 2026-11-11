@@ -31,10 +31,19 @@ def test_view_options():
     assert "--jk-fs:20px" in html and "jk-nonum" in html and "jk-hide" in html
     assert 'class="jk-t" tabindex="0"' in html and 'class="jk-tr" tabindex="0"' in html
     plain = to_html(doc, MODE_BOTH, UNIT_LINE)
-    assert "tabindex" not in plain and "jk-nonum" not in plain.split("</style>")[1]
+    assert 'class="jk-t" tabindex' not in plain and 'class="jk-tr" tabindex' not in plain
+    assert "jk-nonum" not in plain.split("</style>")[1]
 
 
 def test_print_html_is_standalone():
     page = to_print_html(_doc(), MODE_TARGET, UNIT_SENTENCE, None, "<제목>", "영어 · qwen")
     assert page.startswith("<!doctype html>") and "&lt;제목&gt;" in page
     assert "@media print" in page and "→ S[I wait &gt; you]" in page
+
+
+def test_line_play_button_only_with_tts():
+    doc = _doc()
+    html = to_html(doc, MODE_BOTH, UNIT_LINE)
+    assert html.count('class="jk-play"') == 3 and 'data-line="2" data-tts="you"' in html
+    page = to_print_html(doc, MODE_BOTH, UNIT_LINE, None, "t")
+    assert "jk-play" not in page.split("</style>")[1]

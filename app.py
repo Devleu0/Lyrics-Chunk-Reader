@@ -32,6 +32,7 @@ from lyrics_tool.core import (
 from lyrics_tool.i18n import UI_LANGS, pick_ui, t
 from lyrics_tool.langs import LANGS, detect_language, lang_name
 from lyrics_tool.reading import DICT_INTL, DICT_NAVER, DICTS
+from lyrics_tool import speech
 from lyrics_tool.export import FMT_MOBILE, FORMATS, safe_name, song_meta, write_bundle, write_song
 from lyrics_tool.render import (
     FIT_JS, IMAGE_WIDTHS, MODE_SOURCE, MODES, TTS_JS, UNIT_LINE, UNITS, ViewOptions, mode_label, to_html, to_image_html,
@@ -46,6 +47,7 @@ DEFAULT_SETTINGS = {
     "mode": MODE_SOURCE, "unit": UNIT_LINE, "font": 16, "numbers": True, "hide": False,
     "reading": True, "dict": "",
     "fb_engine": "none", "fb_model": "", "auto_clean": True,
+    "voice": "female", "rate": 1.0, "gap": "short",
 }
 
 CACHE: Cache | None = None
@@ -214,6 +216,80 @@ def export_many(ids, formats, *view):
     paths = write_bundle(docs, mode, unit, opts, formats, EXPORT_DIR / "batch", name)
     gr.Info(t(ui, "many_done", n=len(docs)))
     return paths
+
+
+def gender_choices(ui):
+    return [(t(ui, "voice_female"), speech.FEMALE), (t(ui, "voice_male"), speech.MALE)]
+
+
+def gap_choices(ui):
+    return [(t(ui, f"gap_{g}"), g) for g in speech.GAPS]
+
+
+def _speech_error(e: Exception, ui) -> gr.Error:
+    if not speech.available():
+        return gr.Error(t(ui, "tts_missing"))
+    return gr.Error(t(ui, "tts_fail", err=str(e)[:200]))
+
+
+def _audio_path(data: bytes, name: str) -> str:
+    out_dir = EXPORT_DIR / "audio"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / f"{name}_{hashlib.sha1(data).hexdigest()[:10]}.mp3"
+    if not path.exists():
+        path.write_bytes(data)
+    return str(path)
+
+
+def say(doc, req, gender, rate, ui):
+    """어구·줄 하나를 원어 음성으로. req: 브라우저가 적은 {"id", "text", "line"}"""
+    try:
+        r = json.loads(req or "{}")
+    except ValueError:
+        r = {}
+    text = (r.get("text") or "").strip()
+    line = int(r.get("line") or 0)
+    if doc is not None and line:
+        text = doc.sources[line - 1].strip() if 0 < line <= len(doc.sources) else text
+    if not text:
+        raise gr.Error(t(ui, "err_run_first"))
+    lang = doc.lang if doc is not None else "en"
+    try:
+        data = speech.synth_many([text], speech.voice_for(lang, gender), speech.rate_str(rate))[0]
+    except speech.SpeechError as e:
+        raise _speech_error(e, ui) from e
+    d = round(speech.duration(data), 3)
+    return _audio_path(data, "say"), {"id": r.get("id"), "kind": "say",
+                                      "lines": [{"line": line, "start": 0, "end": d}] if line else []}
+
+
+def _song_audio(doc, gender, rate, gap, ui):
+    if doc is None:
+        raise gr.Error(t(ui, "err_run_first"))
+    try:
+        return speech.speak_song(doc, gender, rate, gap)
+    except speech.SpeechError as e:
+        raise _speech_error(e, ui) from e
+
+
+def listen_song(doc, gender, rate, gap, ui):
+    """곡 전체를 원어 음성으로 (재생 막대에서 듣기). 줄별 구간도 넘겨 지금 읽는 줄을 강조한다."""
+    song, timings, _ = _song_audio(doc, gender, rate, gap, ui)
+    return _audio_path(song, "song"), {"kind": "song", "title": doc.title,
+                                       "lines": [vars(x) for x in timings]}
+
+
+def export_mp3(doc, gender, rate, gap, ui):
+    """원어 음성 MP3: 곡 전체 한 파일 + 줄별 MP3 ZIP"""
+    song, _, clips = _song_audio(doc, gender, rate, gap, ui)
+    out_dir = EXPORT_DIR / "mp3"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    base = safe_name(doc.title)
+    whole = out_dir / f"{base}_{gap}.mp3"
+    whole.write_bytes(song)
+    lines = out_dir / f"{base}_lines.zip"
+    lines.write_bytes(speech.lines_zip(doc, clips))
+    return [str(whole), str(lines)]
 
 
 def image_source(doc, width, dark, *view):
@@ -547,19 +623,24 @@ def restore_settings(saved, request: gr.Request):
         s["unit"] = UNIT_LINE
     if s["dict"] not in DICTS:
         s["dict"] = DICT_NAVER if s["target"] == "ko" else DICT_INTL
+    if s["voice"] not in (speech.FEMALE, speech.MALE):
+        s["voice"] = speech.FEMALE
+    if s["gap"] not in speech.GAPS:
+        s["gap"] = speech.GAP_SHORT
     key_u, url_u = _engine_visibility(s["engine"], ui)
     return (ui, s["target"], s["engine"], gr.update(value=s["model"], info=engine_hint(s["engine"], ui)[0]), key_u,
             gr.update(value=s["base_url"], visible=url_u["visible"], placeholder=url_u["placeholder"]),
             s["batch"], s["retries"], s["mode"], s["unit"], s["font"], s["numbers"], s["hide"], s["reading"],
-            s["dict"], s["fb_engine"], s["fb_model"], s["auto_clean"])
+            s["dict"], s["fb_engine"], s["fb_model"], s["auto_clean"], s["voice"], s["rate"], s["gap"])
 
 
 def save_settings(ui, target, engine, model, base_url, batch, retries, mode, unit, font, numbers, hide, reading,
-                  dictionary, fb_engine, fb_model, auto_clean):
+                  dictionary, fb_engine, fb_model, auto_clean, voice, rate, gap):
     # API 키는 브라우저에 저장하지 않는다 (.env 사용 권장)
     return dict(ui=ui, target=target, engine=engine, model=model or "", base_url=base_url or "", batch=batch,
                 retries=retries, mode=mode, unit=unit, font=font, numbers=numbers, hide=hide, reading=reading,
-                dict=dictionary, fb_engine=fb_engine, fb_model=fb_model or "", auto_clean=auto_clean)
+                dict=dictionary, fb_engine=fb_engine, fb_model=fb_model or "", auto_clean=auto_clean,
+                voice=voice, rate=rate, gap=gap)
 
 
 # ---------------------------------------------------------------- 화면
@@ -581,6 +662,16 @@ APP_CSS = """
 #jk-status { font-size: .85em; opacity: .85; min-height: 1.4em; }
 #jk-status p { margin: 2px 0; }
 #jk-viewer { padding: 4px 2px 64px; }
+#jk-hidden { display: none !important; }
+#jk-audio { position: fixed; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 50; display: none;
+            align-items: center; gap: 8px; max-width: min(96vw, 640px); padding: 6px 8px 6px 14px; border-radius: 999px;
+            background: var(--background-fill-primary); border: 1px solid var(--border-color-primary);
+            box-shadow: 0 4px 18px rgba(0,0,0,.25); }
+#jk-audio.jk-on { display: flex; }
+#jk-audio .jk-audio-title { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden;
+                            text-overflow: ellipsis; max-width: 30vw; }
+#jk-audio audio { height: 36px; min-width: 0; flex: 1 1 320px; }
+#jk-audio button { border: 0; background: transparent; color: inherit; font-size: 16px; cursor: pointer; padding: 4px 8px; }
 """
 
 # 뷰어의 줄 번호를 누르면 오른쪽 '줄 수정'에 그 줄을 불러온다. Ctrl/Cmd+Enter로 번역.
@@ -648,9 +739,76 @@ APP_JS = """() => {
             if (offline.msg) toast(offline.msg);
         });
     }, true);
-    // 어구 좌클릭 = 브라우저 TTS (render.TTS_JS)
-    (""" + TTS_JS + """)(toast);
+    // 듣기 (render.TTS_JS): 어구·줄은 숨은 칸(#jk-say)에 요청을 적고 버튼을 눌러 서버 음성(edge-tts)을 받는다.
+    // 곡 전체는 아래쪽 재생 막대로 틀고, 재생 위치에 맞춰 지금 읽는 줄을 강조한다.
+    const tts = (""" + TTS_JS + """)(toast);
+    window.jkTts = tts;
+    window.jkToast = toast;
+    const bar = Object.assign(document.createElement('div'), { id: 'jk-audio' });
+    bar.innerHTML = '<span class="jk-audio-title"></span><audio controls preload="auto"></audio>'
+                  + '<button type="button" aria-label="close">✕</button>';
+    document.body.appendChild(bar);
+    const audio = bar.querySelector('audio');
+    let sayId = 0, sayEl = null, timings = [], lastLine = 0;
+    const clearReading = () => document.querySelectorAll('#jk-viewer .jk-reading')
+        .forEach(x => x.classList.remove('jk-reading'));
+    window.jkServerSay = (text, line, el) => {
+        const box = document.querySelector('#jk-say textarea, #jk-say input');
+        if (!box) return;
+        sayEl = el;
+        box.value = JSON.stringify({ id: ++sayId, text, line: line ? Number(line) : 0 });
+        box.dispatchEvent(new Event('input', { bubbles: true }));
+        setTimeout(() => document.querySelector('#jk-say-btn')?.click(), 60);
+    };
+    window.jkServerStop = () => {
+        sayId++;
+        audio.pause();
+        timings = [];
+        clearReading();
+        bar.classList.remove('jk-on');
+    };
+    const showLine = (n) => {
+        if (n === lastLine) return;
+        lastLine = n;
+        clearReading();
+        const play = document.querySelector(`#jk-viewer .jk-play[data-line="${n}"]`);
+        const line = play?.closest('.jk-line');
+        if (!line) return;
+        line.classList.add('jk-reading');
+        const r = line.getBoundingClientRect();
+        if (r.top < 80 || r.bottom > innerHeight - 90) line.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    };
+    audio.addEventListener('timeupdate', () => {
+        if (!timings.length) return;
+        const t = audio.currentTime;
+        const cur = timings.find(x => t >= x.start && t < x.end + 0.15);
+        if (cur) showLine(cur.line);
+        else if (lastLine) { lastLine = 0; clearReading(); }
+    });
+    audio.addEventListener('ended', () => {
+        if (sayEl) tts.done(sayEl);
+        sayEl = null;
+        if (timings.length) { lastLine = 0; clearReading(); }
+    });
+    bar.querySelector('button').addEventListener('click', () => tts.stop());
+    // 요청한 뒤 한참 지나도 재생되지 않으면(서버 오류 등) '읽는 중' 표시를 지운다
+    window.jkSayCheck = () => { if (sayEl && audio.paused) { tts.done(sayEl); sayEl = null; } };
+    // 서버가 돌려준 음성 재생. p: {id, kind: 'say' | 'song', title, lines: [{line, start, end}]}
+    window.jkPlay = (f, p) => {
+        if (!f?.url || !p) return;
+        if (p.kind === 'say' && p.id !== sayId) return;  // 그 사이 다른 곳을 눌렀다
+        if (p.kind === 'song') { tts.stop(); sayEl = null; }
+        timings = p.lines || [];
+        lastLine = 0;
+        bar.querySelector('.jk-audio-title').textContent = p.title || '';
+        bar.classList.toggle('jk-on', p.kind === 'song');
+        audio.src = f.url;
+        audio.play().catch(() => {});
+    };
 }"""
+
+PLAY_JS = "(f, p) => { window.jkPlay?.(f, p); }"
+SAY_CHECK_JS = "() => { setTimeout(() => window.jkSayCheck?.(), 15000); }"
 
 # 이미지로 저장: image_source가 넘긴 조각 HTML을 숨긴 iframe에서 재어 높이를 구하고, SVG foreignObject로 감싸
 # 캔버스에 그린 뒤 PNG로 내려받는다. 외부 라이브러리 없이 브라우저만으로 그리므로 오프라인에서도 된다.
@@ -763,6 +921,14 @@ def build_ui() -> gr.Blocks:
                 fb_model = L(gr.Textbox(label=t(ui0, "fb_model"), placeholder=t(ui0, "fb_model_ph")),
                              label="fb_model", placeholder="fb_model_ph")
                 L(gr.Markdown(t(ui0, "privacy")), value="privacy")
+            with L(gr.Accordion(t(ui0, "acc_listen"), open=False), label="acc_listen"):
+                voice = L(gr.Radio(gender_choices(ui0), value=speech.FEMALE, label=t(ui0, "voice")),
+                          label="voice", choices=gender_choices)
+                rate = L(gr.Slider(0.5, 1.5, value=1.0, step=0.1, label=t(ui0, "rate"), info=t(ui0, "rate_info")),
+                         label="rate", info="rate_info")
+                gap = L(gr.Radio(gap_choices(ui0), value=speech.GAP_SHORT, label=t(ui0, "gap")),
+                        label="gap", choices=gap_choices)
+                L(gr.Markdown(t(ui0, "listen_note")), value="listen_note")
             with L(gr.Accordion(t(ui0, "acc_display"), open=False), label="acc_display"):
                 font = L(gr.Slider(12, 28, value=16, step=1, label=t(ui0, "font")), label="font")
                 numbers = L(gr.Checkbox(True, label=t(ui0, "numbers")), label="numbers")
@@ -780,6 +946,9 @@ def build_ui() -> gr.Blocks:
                                  label="img_dark")
                 img_btn = L(gr.Button(t(ui0, "img_save"), size="sm"), value="img_save")
                 img_src = gr.File(visible=False)
+                mp3_btn = L(gr.Button(t(ui0, "mp3_save"), size="sm"), value="mp3_save")
+                mp3_files = L(gr.File(label=t(ui0, "mp3_files"), file_count="multiple", visible=True),
+                              label="mp3_files")
                 L(gr.Markdown(t(ui0, "exp_many")), value="exp_many")
                 many = L(gr.Dropdown([], value=[], multiselect=True, allow_custom_value=True,
                                      label=t(ui0, "many_songs"), info=t(ui0, "many_info")),
@@ -854,9 +1023,15 @@ def build_ui() -> gr.Blocks:
                                   visible=False), choices=unit_choices)
                 reading = L(gr.Checkbox(True, label=t(ui0, "reading"), container=False), label="reading")
                 hide = L(gr.Checkbox(False, label=t(ui0, "hide"), container=False), label="hide")
+                listen_btn = L(gr.Button(t(ui0, "listen_all"), size="sm", scale=0), value="listen_all")
                 edit_toggle = L(gr.Button(t(ui0, "edit_toggle"), size="sm", scale=0), value="edit_toggle")
             status = gr.Markdown(elem_id="jk-status")
             output = gr.HTML(to_html(None, MODE_SOURCE), elem_id="jk-viewer")
+            with gr.Column(elem_id="jk-hidden"):  # 브라우저 스크립트가 쓰는 숨은 칸 (visible=False면 DOM에 없다)
+                say_req = gr.Textbox(elem_id="jk-say")
+                say_btn = gr.Button(elem_id="jk-say-btn")
+                audio_file = gr.File()
+                audio_info = gr.JSON()
 
         E = [engine, model, api_key, base_url, batch, retries]
         V = [mode, unit, font, numbers, hide, reading, dict_dd, ui]
@@ -909,6 +1084,13 @@ def build_ui() -> gr.Blocks:
         img_btn.click(image_source, [doc_state, img_width, img_dark, *V], img_src, show_progress="hidden") \
             .success(None, img_src, None, js=IMAGE_JS)
         many_all.click(lambda ids: list(ids), hist_ids, many)
+
+        # 원어 듣기 — 어구·줄은 숨은 칸으로, 곡 전체는 툴바 버튼으로. 받은 MP3는 브라우저(jkPlay)가 튼다
+        S = [voice, rate]
+        say_btn.click(say, [doc_state, say_req, *S, ui], [audio_file, audio_info], show_progress="hidden")             .success(None, [audio_file, audio_info], None, js=PLAY_JS)
+        say_btn.click(None, None, None, js=SAY_CHECK_JS)  # 실패하면 '읽는 중' 표시를 지운다
+        listen_btn.click(lambda u: gr.Info(t(u, "tts_making")), ui)             .then(listen_song, [doc_state, *S, gap, ui], [audio_file, audio_info], show_progress="hidden")             .success(None, [audio_file, audio_info], None, js=PLAY_JS)
+        mp3_btn.click(export_mp3, [doc_state, *S, gap, ui], mp3_files)
         many_btn.click(export_many, [many, many_fmt, *V], many_files)
 
         # 오프라인 사본 — 목록이 바뀌거나 보기 설정으로 다시 그린 뒤, 바뀐 곡의 HTML만 파일로 탭에 보낸다.
@@ -920,10 +1102,10 @@ def build_ui() -> gr.Blocks:
 
         # 설정 기억 (브라우저 저장소)
         remembered = [ui, target, engine, model, base_url, batch, retries, mode, unit, font, numbers, hide, reading,
-                      dict_dd, fb_engine, fb_model, auto_clean]
+                      dict_dd, fb_engine, fb_model, auto_clean, voice, rate, gap]
         demo.load(restore_settings, settings,
                   [ui, target, engine, model, api_key, base_url, batch, retries, mode, unit, font, numbers, hide,
-                   reading, dict_dd, fb_engine, fb_model, auto_clean]).then(history_view, ui, H)
+                   reading, dict_dd, fb_engine, fb_model, auto_clean, voice, rate, gap]).then(history_view, ui, H)
         gr.on([c.change for c in remembered], save_settings, remembered, settings)
 
         demo.load(None, js=APP_JS)

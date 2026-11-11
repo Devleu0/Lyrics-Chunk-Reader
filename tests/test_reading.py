@@ -47,7 +47,7 @@ def test_render_ruby_and_links():
     assert ('<a class="jk-s" href="https://ja.dict.naver.com/#/search?query=%E5%90%9B%E3%82%92" target="_blank" '
             'rel="noopener noreferrer" data-tts="君を" title="Click: listen · Middle-click: dictionary">'
             '<ruby>君<rt>きみ</rt></ruby>を</a>') in body
-    assert 'class="jk-wrap" data-lang="ja" data-no-voice="No voice is installed' in body
+    assert 'class="jk-wrap jk-tts" data-lang="ja" data-no-voice="No voice is installed' in body
     printed = to_print_html(_ja_doc(), MODE_BOTH, UNIT_LINE, None, "t").split("</style>")[1]
     assert "data-tts" not in printed and "data-lang" not in printed and 'title="Look up in dictionary"' in printed
     korean = to_html(_ja_doc(), MODE_TARGET, UNIT_LINE).split("</style>")[1]

@@ -99,6 +99,13 @@ CSS = """
 .jk-s.jk-speaking { background: rgba(255,170,0,.28); }
 .jk-wrap rt { font-size: .55em; font-weight: 400; opacity: .7; }
 .jk-hide .jk-t:hover, .jk-hide .jk-t:focus, .jk-hide .jk-tr:hover, .jk-hide .jk-tr:focus { filter: none; }
+.jk-play { display: inline-block; width: 1.6em; vertical-align: top; padding-top: .3em; font-size: .72em; opacity: .4;
+           cursor: pointer; user-select: none; text-align: center; border-radius: 4px; }
+.jk-play:hover, .jk-play:focus { opacity: 1; outline: none; }
+.jk-tts .jk-chunks { max-width: calc(100% - 3.6em); }
+.jk-tts.jk-nonum .jk-chunks { max-width: calc(100% - 1.3em); }
+.jk-line.jk-reading > .jk-play, .jk-play.jk-speaking { opacity: 1; color: #e08600; }
+.jk-line.jk-reading { background: rgba(255,170,0,.12); border-radius: 6px; box-shadow: 0 0 0 4px rgba(255,170,0,.12); }
 """
 
 PRINT_CSS = """
@@ -133,6 +140,14 @@ def _chunk_src(text: str, c: _Ctx) -> str:
             f'title="{title}">{c.src(text)}</a>')
 
 
+def _play(r: LineResult, c: _Ctx) -> str:
+    """줄 원문 듣기 버튼 (TTS를 쓰는 화면만). 앱은 서버 음성, 모바일 HTML은 브라우저 음성으로 읽는다."""
+    if not c.tts:
+        return ""
+    return (f'<span class="jk-play" role="button" tabindex="0" data-line="{r.index}" data-tts="{escape(r.source)}" '
+            f'title="{_t(c.ui, "play_line")}">▶</span>')
+
+
 def _head(r: LineResult, c: _Ctx) -> str:
     """줄의 원문 부분 — 끊어읽기 카드 또는 원문 한 줄."""
     if c.mode != MODE_TARGET and r.chunks and not r.error and not r.pending:
@@ -142,8 +157,8 @@ def _head(r: LineResult, c: _Ctx) -> str:
             f'<span class="jk-t"{tab}>{escape(ch.t)}</span></span>'
             for ch in r.chunks
         )
-        return f'{_no(r.index)}<span class="jk-chunks">{cards}</span>'
-    return f'{_no(r.index)}<span class="jk-src">{c.src(r.source)}</span>'
+        return f'{_no(r.index)}{_play(r, c)}<span class="jk-chunks">{cards}</span>'
+    return f'{_no(r.index)}{_play(r, c)}<span class="jk-src">{c.src(r.source)}</span>'
 
 
 def _line_html(r: LineResult, c: _Ctx) -> str:
@@ -189,6 +204,8 @@ def _body(doc: Doc, mode: str, unit: str, opts: ViewOptions, tts: bool = True) -
         classes.append("jk-nonum")
     if c.hide:
         classes.append("jk-hide")
+    if tts:
+        classes.append("jk-tts")
     lang = f' data-lang="{escape(doc.lang)}" data-no-voice="{_t(opts.ui, "tts_no_voice")}"' if tts else ""
     return (f'<div class="{" ".join(classes)}"{lang} style="--jk-fs:{int(opts.font_size)}px">'
             f'{"".join(rows)}</div>')
@@ -213,11 +230,12 @@ def to_print_html(doc: Doc, mode: str, unit: str, opts: ViewOptions | None, titl
     )
 
 
-# 어구 좌클릭 = 브라우저 TTS. 앱 화면(APP_JS)과 모바일 HTML이 같이 쓴다. toast(msg)를 받는 함수 식이다.
-# 휠 클릭·Ctrl+클릭(폰에서는 길게 누르기)은 막지 않으므로 href의 사전이 열린다.
+# 듣기: 어구(.jk-s)·줄(.jk-play)을 누르면 원문을 읽는다. 앱 화면(APP_JS)과 모바일 HTML이 같이 쓰는 함수 식으로,
+# toast(msg)를 받아 {speak, stop, readAll}을 돌려준다.
+# window.jkServerSay(text, line, el)가 있으면(앱) 서버 음성으로 넘기고, 없으면(모바일 HTML) 브라우저 음성으로 읽는다.
+# 휠 클릭·Ctrl+클릭(폰에서는 길게 누르기)은 막지 않으므로 어구의 href 사전이 열린다.
 TTS_JS = """(toast) => {
     const tts = window.speechSynthesis;
-    if (!tts || typeof SpeechSynthesisUtterance === 'undefined') return;
     const BCP47 = { en: 'en-US', ja: 'ja-JP', zh: 'zh-CN', ko: 'ko-KR', es: 'es-ES', fr: 'fr-FR', de: 'de-DE',
                     pt: 'pt-BR', it: 'it-IT', ru: 'ru-RU', vi: 'vi-VN', th: 'th-TH', id: 'id-ID' };
     const pickVoice = (lang) => {
@@ -227,33 +245,80 @@ TTS_JS = """(toast) => {
                            + (v.lang.replace('_', '-').toLowerCase() === lang.toLowerCase() ? 1 : 0);
         return voices.sort((a, b) => score(b) - score(a))[0] || null;
     };
-    tts.getVoices();  // Chrome은 처음 부를 때 목록을 비동기로 채운다
-    let current = null;
-    document.addEventListener('click', (e) => {
-        const el = e.target.closest('.jk-s[data-tts]');
-        if (!el || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
-        e.preventDefault();
-        const wasSame = current === el && tts.speaking;
-        tts.cancel();
-        current?.classList.remove('jk-speaking');
+    tts?.getVoices();  // Chrome은 처음 부를 때 목록을 비동기로 채운다
+    let current = null, run = 0;
+    const mark = (el, on) => {
+        if (!el) return;
+        el.classList.toggle('jk-speaking', on);
+        if (el.classList.contains('jk-play')) el.closest('.jk-line')?.classList.toggle('jk-reading', on);
+    };
+    const stop = () => {
+        run++;
+        tts?.cancel();
+        window.jkServerStop?.();
+        mark(current, false);
         current = null;
-        if (wasSame) return;  // 읽는 중에 다시 누르면 멈춤
+    };
+    // 브라우저 음성으로 한 번 읽는다. 끝나면 done(ok) — 음성이 없으면 안내하고 false
+    const speak = (el, text, done) => {
         const wrap = el.closest('.jk-wrap');
         const code = wrap?.dataset.lang || '';
         const lang = BCP47[code] || code;
+        const none = wrap?.dataset.noVoice || `No voice for ${lang}`;
+        if (!tts || typeof SpeechSynthesisUtterance === 'undefined') { toast(none); return done?.(false); }
         const voice = lang && pickVoice(lang);
         // 목록이 채워졌는데 맞는 음성이 없으면 기본 음성(다른 언어)으로 엉뚱하게 읽으므로 안내만 한다
-        if (lang && !voice && tts.getVoices().length) return toast(wrap?.dataset.noVoice || `No voice for ${lang}`);
-        const u = new SpeechSynthesisUtterance(el.dataset.tts);
+        if (lang && !voice && tts.getVoices().length) { toast(none); return done?.(false); }
+        const u = new SpeechSynthesisUtterance(text);
         if (lang) u.lang = lang;
         if (voice) u.voice = voice;
-        const done = () => { el.classList.remove('jk-speaking'); if (current === el) current = null; };
-        u.onend = done;
-        u.onerror = done;
-        el.classList.add('jk-speaking');
+        u.rate = parseFloat(document.documentElement.dataset.rate || '1') || 1;
+        const end = () => { mark(el, false); if (current === el) current = null; done?.(true); };
+        u.onend = end;
+        u.onerror = end;
+        mark(el, true);
         current = el;
         tts.speak(u);
+    };
+    const say = (el, text, line) => {
+        const wasSame = current === el;
+        stop();
+        if (wasSame) return;  // 읽는 중에 다시 누르면 멈춤
+        if (window.jkServerSay) { current = el; mark(el, true); return window.jkServerSay(text, line, el); }
+        speak(el, text);
+    };
+    // 서버 음성이 끝났을 때(앱) 표시를 지운다
+    const done = (el) => { mark(el, false); if (current === el) current = null; };
+    document.addEventListener('click', (e) => {
+        const el = e.target.closest('.jk-s[data-tts], .jk-play');
+        if (!el || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+        e.preventDefault();
+        say(el, el.dataset.tts, el.classList.contains('jk-play') ? el.dataset.line : '');
     });
+    document.addEventListener('keydown', (e) => {
+        const el = e.target.closest?.('.jk-play');
+        if (el && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); el.click(); }
+    });
+    // 브라우저 음성으로 줄들을 차례로 읽는다(모바일 HTML의 '전체 듣기'). echo면 그 줄 길이만큼 쉬어 따라 해 볼 수 있게
+    const readAll = (plays, echo, onDone) => {
+        stop();
+        const my = run;
+        let i = 0;
+        const next = () => {
+            if (my !== run) return;
+            if (i >= plays.length) return onDone?.();
+            const el = plays[i++];
+            el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+            const t0 = Date.now();
+            speak(el, el.dataset.tts, (ok) => {
+                if (my !== run) return;
+                if (!ok) { stop(); return onDone?.(); }
+                setTimeout(next, echo ? Date.now() - t0 + 500 : 450);
+            });
+        };
+        next();
+    };
+    return { speak, stop, readAll, done };
 }"""
 
 # 폰 폭에 맞추기: 원문 한 줄(끊어읽기 카드 묶음 또는 원문 줄)을 줄바꿈하지 않고, 넘치면 FIT_JS가 그 줄만
@@ -261,6 +326,9 @@ TTS_JS = """(toast) => {
 FIT_CSS = """
 .jk-line { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; }
 .jk-nonum .jk-line { grid-template-columns: minmax(0, 1fr); }
+.jk-tts .jk-line { grid-template-columns: auto auto minmax(0, 1fr); }
+.jk-tts.jk-nonum .jk-line { grid-template-columns: auto minmax(0, 1fr); }
+.jk-tts .jk-line > .jk-chunks, .jk-tts .jk-line > .jk-src { max-width: none; }
 .jk-line > .jk-chunks, .jk-line > .jk-src { min-width: 0; max-width: none; overflow-x: auto; scrollbar-width: none; }
 .jk-line > .jk-tr, .jk-line > .jk-err { grid-column: 1 / -1; margin-left: 0; padding-left: 2em; }
 .jk-nonum .jk-line > .jk-tr, .jk-nonum .jk-line > .jk-err { padding-left: 0; }
@@ -323,6 +391,7 @@ body { margin: 0; background: var(--bg); color: var(--fg);
 .m-btn { font: inherit; font-size: 13px; color: inherit; background: transparent; border: 1px solid var(--line);
          border-radius: 999px; padding: 6px 11px; min-height: 34px; cursor: pointer; }
 .m-btn[aria-pressed="true"] { background: var(--on); color: var(--on-fg); border-color: var(--on); }
+.m-acts .m-btn { flex: 1 1 0; padding: 6px 4px; white-space: nowrap; }
 .m-seg { display: flex; flex: 1 1 100%; }
 .m-seg .m-btn { flex: 1 1 0; border-radius: 0; margin-left: -1px; padding: 6px 4px; }
 .m-seg .m-btn:first-child { border-radius: 999px 0 0 999px; margin-left: 0; }
@@ -394,7 +463,27 @@ MOBILE_JS = """
     document.body.appendChild(d);
     setTimeout(() => d.remove(), 3500);
   };
-  (%TTS%)(toast);
+  const tts = (%TTS%)(toast);
+  // 전체 듣기: 화면에 보이는 곡부터 그 곡의 줄을 차례로 읽는다. 다시 누르면 멈춤. '따라 말하기'면 줄마다 그 길이만큼 쉰다
+  const readBtn = document.querySelector('[data-act="readall"]');
+  const echoBtn = document.querySelector('[data-act="echo"]');
+  let reading = false;
+  const setReading = (on) => { reading = on; readBtn?.setAttribute('aria-pressed', String(on)); };
+  echoBtn?.setAttribute('aria-pressed', String(!!prefs.echo));
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-act="readall"], [data-act="echo"]');
+    if (!b) return;
+    e.stopImmediatePropagation();
+    if (b.dataset.act === 'echo') {
+      prefs.echo = !prefs.echo; save(); b.setAttribute('aria-pressed', String(prefs.echo)); return;
+    }
+    if (reading) { tts.stop(); return setReading(false); }
+    const songs = [...document.querySelectorAll('.m-song')];
+    const song = songs.find(s => s.getBoundingClientRect().bottom > 120) || songs[0];
+    const plays = [...song.querySelectorAll(`.m-mode[data-mode="${root.dataset.mode}"] .jk-play`)];
+    setReading(true);
+    tts.readAll(plays, !!prefs.echo, () => setReading(false));
+  }, true);
 })();
 """
 
@@ -427,9 +516,12 @@ def to_mobile_html(songs: list[tuple[Doc, str]], mode: str, unit: str, opts: Vie
     modes = "".join(f'<button class="m-btn" type="button" data-set-mode="{m}">{_t(ui, f"m_mode_{m}")}</button>'
                     for m in MODES)
     bar = (f'<header class="m-bar"><div class="m-row"><div class="m-book">{escape(title)}</div>'
-           f'<button class="m-btn" type="button" data-act="hide" aria-pressed="false">{_t(ui, "m_hide")}</button>'
            f'<button class="m-btn" type="button" data-act="smaller" aria-label="{_t(ui, "m_smaller")}">A−</button>'
            f'<button class="m-btn" type="button" data-act="bigger" aria-label="{_t(ui, "m_bigger")}">A+</button>'
+           f'</div><div class="m-row m-acts">'
+           f'<button class="m-btn" type="button" data-act="readall" aria-pressed="false">{_t(ui, "m_readall")}</button>'
+           f'<button class="m-btn" type="button" data-act="echo" aria-pressed="false">{_t(ui, "m_echo")}</button>'
+           f'<button class="m-btn" type="button" data-act="hide" aria-pressed="false">{_t(ui, "m_hide")}</button>'
            f'</div><div class="m-row"><div class="m-seg" role="group">{modes}</div></div></header>')
     fs = max(int(opts.font_size), 17)
     return (
