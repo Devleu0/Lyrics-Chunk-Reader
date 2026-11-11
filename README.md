@@ -99,9 +99,11 @@ Under **Settings → Export**. Every file follows the current view settings (vie
 
 - **Open song**: mobile HTML · printable HTML · Markdown · JSON are ready to download as soon as a song is shown.
 - **🖼 Save as image (PNG)**: draws the open song as one long image, at phone width or wide, light or dark. Your browser draws it with its own fonts (no extra libraries, works offline), so pronunciation and chunk cards look like the screen. Hidden translations are shown in the image.
-- **Mobile HTML**: one self-contained file for reading on a phone. A bar at the top switches between chunks / literal / both, hides meanings for self-testing (tap a meaning to peek), and changes the text size; your choices are remembered on that phone. Each lyric line stays on one row: long lines get tighter and smaller, and only lines that would drop below 60% wrap. Tap a chunk or a line's ▶ to hear it, or **▶ Listen** to read the song line by line (**Repeat gaps** leaves time to repeat each line) — this uses the phone's own voices. Long-press a chunk to open the dictionary link. Follows the phone's dark mode.
+- **Mobile HTML**: one self-contained file for reading on a phone. A bar at the top switches between chunks / literal / both, hides meanings for self-testing (tap a meaning to peek), and changes the text size; your choices are remembered on that phone. Each lyric line stays on one row: long lines get tighter and smaller, and only lines that would drop below 60% wrap (a chunk longer than the screen wraps inside its card, so the page never scrolls sideways). Tap a chunk or a line's ▶ to hear it, or **▶ Listen** to read the song line by line (**Repeat gaps** leaves time to repeat each line) — this uses the phone's own voices. Long-press a chunk to open the dictionary link. Follows the phone's dark mode.
 - **🎧 Make MP3**: the open song read in the original language — one MP3 of the whole song and a ZIP with one MP3 per line (`01_first words.mp3` …), using the Listen settings.
 - **Several songs at once**: pick songs from your saved history (in the order you want, or **Select all**) and the formats. Mobile HTML puts every song into one file with a table of contents; the other formats go into a ZIP with one folder per song. Songs are exported as saved — nothing is translated again.
+
+<img src="docs/images/export-panel-en.png" alt="Export panel" width="200"> <img src="docs/images/export-mobile-en.png" alt="Mobile HTML on a phone" width="250"> <img src="docs/images/export-image-en.png" alt="Saved PNG image" width="320">
 
 ## Listen
 
@@ -111,6 +113,8 @@ Hear the **original lyrics** to compare your pronunciation.
 - **Settings → 🔊 Listen**: female / male voice, speed (0.5–1.5×), and the pause between lines for the whole song — short, 1.5 s, or **time to repeat** (as long as the line itself, plus half a second).
 - Voices: Microsoft Edge's online neural voices via [edge-tts](https://github.com/rany2/edge-tts) (`pip install edge-tts`, included in `requirements.txt`). The original lyrics are sent to Microsoft and an internet connection is needed. Each line is made once and cached, so replays are instant (the first whole song takes several seconds).
 - The mobile HTML can't call the app, so there it reads with the phone's own voices.
+
+![Listen to all — player and the line being read](docs/images/listen-en.png)
 
 ## History
 
