@@ -30,15 +30,19 @@ def test_mobile_html_holds_all_modes_and_toc():
     docs = [_doc("One"), _doc("Two", "bye")]
     page = to_mobile_html([(d, "meta") for d in docs], MODE_BOTH, UNIT_SENTENCE, ViewOptions(ui="ko"), "Book")
     assert page.startswith("<!doctype html>") and 'name="viewport"' in page and 'data-mode="both"' in page
-    assert page.count('class="m-song"') == 2 and 'href="#song-2"' in page and "목차" in page
-    assert '<details class="m-tocbox" id="m-toc" open>' in page and 'class="m-book" href="#m-toc"' in page
+    # 여러 곡: 한 번에 한 곡(처음은 1번), ⋮ 서랍의 곡 목록, 곡 끝의 이전·다음
+    assert 'class="m-many"' in page and page.count('class="m-song') == 2 and 'class="m-song m-cur" id="song-1"' in page
+    assert 'id="m-drawer"' in page and 'data-act="menu"' in page and 'href="#song-2"' in page
+    assert '<div class="m-nav"><span class="m-gap"></span><a class="m-next" href="#song-2">' in page
+    assert '<a href="#song-1"><small>‹ 이전 곡</small>One</a><span class="m-gap"></span>' in page
+    assert 'data-fs="15"' in page
     for m in ("source", "target", "both"):
         assert page.count(f'class="m-mode" data-mode="{m}"') == 2
     assert "S[I wait &gt; you]" in page  # 문장 단위 직역
     assert "data-tts=" in page and "speechSynthesis" in page and "prefers-color-scheme: dark" in page
     single = to_mobile_html([(docs[0], "m")], MODE_SOURCE, UNIT_SENTENCE, None, "One")
-    markup = single.split("<script>")[0]  # 곡이 하나면 목차도, 목차로 가는 링크도 없다
-    assert 'id="m-toc"' not in markup and 'href="#m-toc"' not in markup
+    markup = single.split("<script>")[0]  # 곡이 하나면 서랍·⋮·이전·다음이 없다
+    assert all(k not in markup for k in ('id="m-drawer"', 'data-act="menu"', 'class="m-nav"', 'class="m-many"'))
 
 
 def test_image_html_is_self_contained():

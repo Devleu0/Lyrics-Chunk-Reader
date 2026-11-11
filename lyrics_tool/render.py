@@ -399,23 +399,40 @@ body { margin: 0; background: var(--bg); color: var(--fg);
 .m-seg .m-btn:first-child { border-radius: 999px 0 0 999px; margin-left: 0; }
 .m-seg .m-btn:last-child { border-radius: 0 999px 999px 0; }
 main { max-width: 720px; margin: 0 auto; padding: 12px 14px calc(48px + env(safe-area-inset-bottom)); }
-.m-tocbox { margin: 4px 0 20px; border: 1px solid var(--line); border-radius: 12px; scroll-margin-top: 96px; }
-.m-tocbox > summary { padding: 10px 14px; font-weight: 700; font-size: 15px; cursor: pointer; }
-.m-tocbox > summary small { color: var(--muted); font-weight: 400; }
-.m-tocbox[open] > summary { border-bottom: 1px solid var(--line); }
-.m-toc { margin: 0; padding: 0; list-style: none; }
+.m-menu { width: 38px; padding: 0; font-size: 20px; line-height: 1; }
+/* 곡 목록 서랍: ⋮로 언제든 연다. 곡을 고르면 닫히고 그 곡만 보인다 */
+.m-drawer { position: fixed; inset: 0; z-index: 30; visibility: hidden; transition: visibility 0s .2s; }
+.m-drawer.m-open { visibility: visible; transition: none; }
+.m-shade { position: absolute; inset: 0; background: rgba(0,0,0,.45); opacity: 0; transition: opacity .2s; }
+.m-open .m-shade { opacity: 1; }
+.m-panel { position: absolute; top: 0; right: 0; bottom: 0; width: min(84vw, 340px); display: flex;
+           flex-direction: column; background: var(--bg); border-left: 1px solid var(--line);
+           padding-top: env(safe-area-inset-top); transform: translateX(100%); transition: transform .2s; }
+.m-open .m-panel { transform: none; }
+.m-head { display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 16px;
+          border-bottom: 1px solid var(--line); }
+.m-head b { flex: 1 1 auto; min-width: 0; font-size: 14px; overflow: hidden; text-overflow: ellipsis;
+            white-space: nowrap; }
+.m-toc { flex: 1 1 auto; margin: 0; padding: 0 0 env(safe-area-inset-bottom); list-style: none; overflow-y: auto;
+         overscroll-behavior: contain; }
 .m-toc li + li { border-top: 1px solid var(--line); }
-.m-toc a { display: flex; gap: 8px; padding: 9px 14px; font-size: 15px; color: inherit; text-decoration: none; }
+.m-toc a { display: flex; gap: 8px; padding: 11px 16px; font-size: 14px; color: inherit; text-decoration: none; }
+.m-toc a[aria-current="true"] { color: var(--on); font-weight: 700; }
 .m-toc span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-a.m-book { color: inherit; text-decoration: none; }
 .m-toc small { margin-left: auto; color: var(--muted); white-space: nowrap; }
-.m-song { scroll-margin-top: 96px; }
-.m-song + .m-song { margin-top: 36px; padding-top: 20px; border-top: 1px solid var(--line); }
+body.m-lock { overflow: hidden; }
+.m-many .m-song { display: none; }
+.m-many .m-song.m-cur { display: block; }
 .m-song h2 { font-size: 1.15em; margin: 0 0 2px; }
 .m-meta { color: var(--muted); font-size: 12px; margin-bottom: 14px; }
-.m-top { display: inline-block; margin-top: 8px; color: var(--muted); font-size: 13px; text-decoration: none;
-         padding: 8px 0; }
-.jk-wrap { font-size: var(--m-fs, 18px); line-height: 1.55; }
+.m-nav { display: flex; gap: 8px; margin-top: 24px; }
+.m-nav a { flex: 1 1 0; min-width: 0; padding: 9px 12px; border: 1px solid var(--line); border-radius: 10px;
+           color: inherit; text-decoration: none; font-size: 13px; overflow: hidden; text-overflow: ellipsis;
+           white-space: nowrap; }
+.m-nav small { display: block; color: var(--muted); font-size: 11px; }
+.m-nav .m-next { text-align: right; }
+.m-nav .m-gap { flex: 1 1 0; }
+.jk-wrap { font-size: var(--m-fs, 15px); line-height: 1.5; }
 .jk-line { margin: 0 0 1em; }
 .jk-tr, .jk-err { margin-left: 2em; }
 .jk-no { min-width: 1.9em; }
@@ -433,7 +450,7 @@ MOBILE_JS = """
   let prefs = {};
   try { prefs = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch {}
   const save = () => { try { localStorage.setItem(KEY, JSON.stringify(prefs)); } catch {} };
-  const fs0 = parseInt(root.dataset.fs, 10) || 18;
+  const fs0 = parseInt(root.dataset.fs, 10) || 15;
   let apply = () => {
     root.dataset.mode = prefs.mode || root.dataset.mode;
     root.classList.toggle('m-hide', !!prefs.hide);
@@ -451,27 +468,6 @@ MOBILE_JS = """
       if (act === 'bigger') prefs.fs = Math.min(32, (prefs.fs || fs0) + 1);
       if (act === 'smaller') prefs.fs = Math.max(12, (prefs.fs || fs0) - 1);
       save(); apply(); return;
-    }
-    const box = document.getElementById('m-toc');
-    const goTo = (el) => {  // 위쪽 막대 높이만큼 비워 두고 옮긴다(글자 크기에 따라 막대 높이가 바뀐다)
-      const bar = document.querySelector('.m-bar')?.offsetHeight || 0;
-      scrollTo({ top: el.getBoundingClientRect().top + scrollY - bar - 8 });
-    };
-    const pick = box && e.target.closest('.m-toc a');
-    if (pick) {  // 곡을 고르면 목차를 접고 그 곡으로 간다(접은 뒤에 옮겨야 위치가 맞는다)
-      e.preventDefault();
-      box.open = false;
-      const id = pick.getAttribute('href').slice(1);
-      const song = document.getElementById(id);
-      if (song) goTo(song);
-      history.replaceState(null, '', '#' + id);
-      return;
-    }
-    if (box && e.target.closest('a[href="#m-toc"]')) {  // '↑ 목차'·위쪽 제목: 다시 펼친다
-      e.preventDefault();
-      box.open = true;
-      goTo(box);
-      return;
     }
     const gloss = root.classList.contains('m-hide') && e.target.closest('.jk-t, .jk-tr');
     if (gloss) gloss.classList.toggle('m-shown');  // 가린 뜻은 눌러서 하나씩 확인
@@ -507,19 +503,57 @@ MOBILE_JS = """
       prefs.echo = !prefs.echo; save(); b.setAttribute('aria-pressed', String(prefs.echo)); return;
     }
     if (reading) { tts.stop(); return setReading(false); }
-    const songs = [...document.querySelectorAll('.m-song')];
-    const song = songs.find(s => s.getBoundingClientRect().bottom > 120) || songs[0];
+    const song = document.querySelector('.m-song.m-cur') || document.querySelector('.m-song');
     const plays = [...song.querySelectorAll(`.m-mode[data-mode="${root.dataset.mode}"] .jk-play`)];
     setReading(true);
     tts.readAll(plays, !!prefs.echo, () => setReading(false));
   }, true);
+  // 여러 곡: 한 번에 한 곡만 보이고, ⋮ 서랍의 목록이나 곡 끝의 이전·다음으로 바꾼다. 마지막에 본 곡을 기억한다
+  const songs = [...document.querySelectorAll('.m-song')];
+  const drawer = document.getElementById('m-drawer');
+  if (songs.length < 2 || !drawer) return;
+  const links = [...drawer.querySelectorAll('.m-toc a')];
+  const bookEl = document.querySelector('.m-book');
+  const book = document.title;
+  const openDrawer = (on) => {
+    drawer.classList.toggle('m-open', on);
+    document.body.classList.toggle('m-lock', on);
+    drawer.setAttribute('aria-hidden', String(!on));
+    if (on) links.find(a => a.getAttribute('aria-current') === 'true')?.scrollIntoView({ block: 'center' });
+  };
+  const show = (i, top = true) => {
+    i = Math.max(0, Math.min(songs.length - 1, i | 0));
+    if (reading) { tts.stop(); setReading(false); }
+    songs.forEach((s, k) => s.classList.toggle('m-cur', k === i));
+    links.forEach((a, k) => a.setAttribute('aria-current', String(k === i)));
+    bookEl.textContent = songs[i].querySelector('h2').textContent;
+    prefs.last = Object.assign(prefs.last || {}, { [book]: i }); save();
+    // 처음 열 때 주소에 #을 붙이면 브라우저가 그 곡으로 내려가 제목이 막대 밑에 가려진다. 고를 때만 붙인다
+    if (top) { history.replaceState(null, '', '#' + songs[i].id); scrollTo(0, 0); }
+    refit();
+  };
+  const fromHash = () => songs.findIndex(s => '#' + s.id === location.hash);
+  document.addEventListener('click', (e) => {
+    if (e.target.closest('[data-act="menu"]')) return openDrawer(true);
+    if (e.target.closest('[data-act="close"], .m-shade')) return openDrawer(false);
+    const a = e.target.closest('.m-toc a, .m-nav a');
+    if (!a) return;
+    e.preventDefault();
+    show(songs.findIndex(s => '#' + s.id === a.getAttribute('href')));
+    openDrawer(false);
+  });
+  addEventListener('keydown', (e) => { if (e.key === 'Escape') openDrawer(false); });
+  addEventListener('hashchange', () => { const i = fromHash(); if (i >= 0) show(i); });
+  const h = fromHash();
+  show(h >= 0 ? h : (prefs.last || {})[book] || 0, false);
+  if (h >= 0) addEventListener('load', () => setTimeout(() => scrollTo(0, 0), 50));  // #song-N으로 열어도 곡 맨 위에서
 })();
 """
 
 
 def to_mobile_html(songs: list[tuple[Doc, str]], mode: str, unit: str, opts: ViewOptions | None,
                    title: str) -> str:
-    """폰에서 읽기 좋은 단독 HTML. 곡이 여럿이면 목차가 붙는 한 파일로 묶는다.
+    """폰에서 읽기 좋은 단독 HTML. 곡이 여럿이면 한 파일로 묶고 한 번에 한 곡씩 보인다(⋮ 서랍에서 고름).
 
     songs: (문서, 곡 설명 한 줄). 보기 방식 세 가지를 모두 넣어 두고 위쪽 막대에서 바꾼다(처음은 mode).
     번역 가리기(누르면 하나씩 보임)·글자 크기도 막대에서 바꾸며, 고른 값은 그 브라우저에 기억한다.
@@ -529,40 +563,54 @@ def to_mobile_html(songs: list[tuple[Doc, str]], mode: str, unit: str, opts: Vie
     ui = opts.ui
     view = ViewOptions(opts.font_size, opts.show_numbers, False, opts.reading, opts.dictionary, ui)
     many = len(songs) > 1
-    toc = ""
+    names = [escape(doc.title or _t(ui, "untitled")) for doc, _ in songs]
+    drawer = ""
     if many:
         items = "".join(
-            f'<li><a href="#song-{i}"><span>{i}. {escape(doc.title or _t(ui, "untitled"))}</span>'
+            f'<li><a href="#song-{i}"><span>{i}. {names[i - 1]}</span>'
             f'<small>{sum(1 for s in doc.sources if s.strip())}{escape(_t(ui, "m_lines_suffix"))}</small></a></li>'
             for i, (doc, _) in enumerate(songs, 1))
-        # 처음엔 펼쳐 두고, 곡을 고르면 접는다. 곡 끝의 '↑ 목차'나 위쪽 제목을 누르면 다시 펼친다(MOBILE_JS)
-        count = _t(ui, "m_toc_count", n=len(songs))
-        toc = (f'<details class="m-tocbox" id="m-toc" open><summary>{_t(ui, "m_toc")} <small>· {count}</small>'
-               f'</summary><ol class="m-toc">{items}</ol></details>')
+        drawer = (f'<div class="m-drawer" id="m-drawer" aria-hidden="true"><div class="m-shade"></div>'
+                  f'<nav class="m-panel" aria-label="{_t(ui, "m_toc")}"><div class="m-head"><b>{escape(title)}'
+                  f'</b><button class="m-btn m-menu" type="button" data-act="close" '
+                  f'aria-label="{_t(ui, "m_close")}">×</button></div><ol class="m-toc">{items}</ol></nav></div>')
+
+    def nav(i: int) -> str:
+        """곡 끝의 이전·다음 곡 버튼."""
+        if not many:
+            return ""
+        gap = '<span class="m-gap"></span>'
+        prev = f'<a href="#song-{i - 1}"><small>‹ {_t(ui, "m_prev")}</small>{names[i - 2]}</a>' if i > 1 else gap
+        nxt = (f'<a class="m-next" href="#song-{i + 1}"><small>{_t(ui, "m_next")} ›</small>{names[i]}</a>'
+               if i < len(songs) else gap)
+        return f'<div class="m-nav">{prev}{nxt}</div>'
+
     sections = []
     for i, (doc, meta) in enumerate(songs, 1):
         bodies = "".join(f'<div class="m-mode" data-mode="{m}">{_body(doc, m, unit, view)}</div>' for m in MODES)
-        back = f'<a class="m-top" href="#m-toc">↑ {_t(ui, "m_toc")}</a>' if many else ""
-        sections.append(f'<section class="m-song" id="song-{i}"><h2>{escape(doc.title or _t(ui, "untitled"))}</h2>'
-                        f'<div class="m-meta">{escape(meta)}</div>{bodies}{back}</section>')
+        cur = " m-cur" if i == 1 else ""
+        sections.append(f'<section class="m-song{cur}" id="song-{i}"><h2>{names[i - 1]}</h2>'
+                        f'<div class="m-meta">{escape(meta)}</div>{bodies}{nav(i)}</section>')
     modes = "".join(f'<button class="m-btn" type="button" data-set-mode="{m}">{_t(ui, f"m_mode_{m}")}</button>'
                     for m in MODES)
-    book = (f'<a class="m-book" href="#m-toc">{escape(title)}</a>' if many
-            else f'<div class="m-book">{escape(title)}</div>')
-    bar = (f'<header class="m-bar"><div class="m-row">{book}'
+    menu = (f'<button class="m-btn m-menu" type="button" data-act="menu" aria-label="{_t(ui, "m_toc")}">⋮</button>'
+            if many else "")
+    head = names[0] if many else escape(title)  # 여러 곡이면 지금 보는 곡 제목(MOBILE_JS가 바꾼다)
+    bar = (f'<header class="m-bar"><div class="m-row"><div class="m-book">{head}</div>'
            f'<button class="m-btn" type="button" data-act="smaller" aria-label="{_t(ui, "m_smaller")}">A−</button>'
-           f'<button class="m-btn" type="button" data-act="bigger" aria-label="{_t(ui, "m_bigger")}">A+</button>'
+           f'<button class="m-btn" type="button" data-act="bigger" aria-label="{_t(ui, "m_bigger")}">A+</button>{menu}'
            f'</div><div class="m-row m-acts">'
            f'<button class="m-btn" type="button" data-act="readall" aria-pressed="false">{_t(ui, "m_readall")}</button>'
            f'<button class="m-btn" type="button" data-act="echo" aria-pressed="false">{_t(ui, "m_echo")}</button>'
            f'<button class="m-btn" type="button" data-act="hide" aria-pressed="false">{_t(ui, "m_hide")}</button>'
            f'</div><div class="m-row"><div class="m-seg" role="group">{modes}</div></div></header>')
-    fs = max(int(opts.font_size), 17)
+    fs = 15  # 폰 기본 글자 크기(px). A−·A+로 바꾼 값은 그 폰에 기억된다
+    cls = ' class="m-many"' if many else ""
     return (
-        f'<!doctype html><html lang="{ui}" data-mode="{mode}" data-fs="{fs}"><head><meta charset="utf-8">'
+        f'<!doctype html><html lang="{ui}" data-mode="{mode}" data-fs="{fs}"{cls}><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">'
         f"<title>{escape(title)}</title><style>{CSS}{MOBILE_CSS}{FIT_CSS}</style></head><body>"
-        f"{bar}<main>{toc}{''.join(sections)}</main>"
+        f"{bar}<main>{''.join(sections)}</main>{drawer}"
         f"<script>{MOBILE_JS.replace('%TTS%', TTS_JS)}</script></body></html>"
     )
 
