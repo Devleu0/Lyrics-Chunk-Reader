@@ -399,9 +399,15 @@ body { margin: 0; background: var(--bg); color: var(--fg);
 .m-seg .m-btn:first-child { border-radius: 999px 0 0 999px; margin-left: 0; }
 .m-seg .m-btn:last-child { border-radius: 0 999px 999px 0; }
 main { max-width: 720px; margin: 0 auto; padding: 12px 14px calc(48px + env(safe-area-inset-bottom)); }
-.m-toc { margin: 4px 0 20px; padding: 0; list-style: none; border: 1px solid var(--line); border-radius: 12px; }
+.m-tocbox { margin: 4px 0 20px; border: 1px solid var(--line); border-radius: 12px; scroll-margin-top: 96px; }
+.m-tocbox > summary { padding: 10px 14px; font-weight: 700; font-size: 15px; cursor: pointer; }
+.m-tocbox > summary small { color: var(--muted); font-weight: 400; }
+.m-tocbox[open] > summary { border-bottom: 1px solid var(--line); }
+.m-toc { margin: 0; padding: 0; list-style: none; }
 .m-toc li + li { border-top: 1px solid var(--line); }
-.m-toc a { display: flex; gap: 8px; padding: 12px 14px; color: inherit; text-decoration: none; }
+.m-toc a { display: flex; gap: 8px; padding: 9px 14px; font-size: 15px; color: inherit; text-decoration: none; }
+.m-toc span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+a.m-book { color: inherit; text-decoration: none; }
 .m-toc small { margin-left: auto; color: var(--muted); white-space: nowrap; }
 .m-song { scroll-margin-top: 96px; }
 .m-song + .m-song { margin-top: 36px; padding-top: 20px; border-top: 1px solid var(--line); }
@@ -445,6 +451,27 @@ MOBILE_JS = """
       if (act === 'bigger') prefs.fs = Math.min(32, (prefs.fs || fs0) + 1);
       if (act === 'smaller') prefs.fs = Math.max(12, (prefs.fs || fs0) - 1);
       save(); apply(); return;
+    }
+    const box = document.getElementById('m-toc');
+    const goTo = (el) => {  // 위쪽 막대 높이만큼 비워 두고 옮긴다(글자 크기에 따라 막대 높이가 바뀐다)
+      const bar = document.querySelector('.m-bar')?.offsetHeight || 0;
+      scrollTo({ top: el.getBoundingClientRect().top + scrollY - bar - 8 });
+    };
+    const pick = box && e.target.closest('.m-toc a');
+    if (pick) {  // 곡을 고르면 목차를 접고 그 곡으로 간다(접은 뒤에 옮겨야 위치가 맞는다)
+      e.preventDefault();
+      box.open = false;
+      const id = pick.getAttribute('href').slice(1);
+      const song = document.getElementById(id);
+      if (song) goTo(song);
+      history.replaceState(null, '', '#' + id);
+      return;
+    }
+    if (box && e.target.closest('a[href="#m-toc"]')) {  // '↑ 목차'·위쪽 제목: 다시 펼친다
+      e.preventDefault();
+      box.open = true;
+      goTo(box);
+      return;
     }
     const gloss = root.classList.contains('m-hide') && e.target.closest('.jk-t, .jk-tr');
     if (gloss) gloss.classList.toggle('m-shown');  // 가린 뜻은 눌러서 하나씩 확인
@@ -508,7 +535,10 @@ def to_mobile_html(songs: list[tuple[Doc, str]], mode: str, unit: str, opts: Vie
             f'<li><a href="#song-{i}"><span>{i}. {escape(doc.title or _t(ui, "untitled"))}</span>'
             f'<small>{sum(1 for s in doc.sources if s.strip())}{escape(_t(ui, "m_lines_suffix"))}</small></a></li>'
             for i, (doc, _) in enumerate(songs, 1))
-        toc = f'<ol class="m-toc" id="m-toc">{items}</ol>'
+        # 처음엔 펼쳐 두고, 곡을 고르면 접는다. 곡 끝의 '↑ 목차'나 위쪽 제목을 누르면 다시 펼친다(MOBILE_JS)
+        count = _t(ui, "m_toc_count", n=len(songs))
+        toc = (f'<details class="m-tocbox" id="m-toc" open><summary>{_t(ui, "m_toc")} <small>· {count}</small>'
+               f'</summary><ol class="m-toc">{items}</ol></details>')
     sections = []
     for i, (doc, meta) in enumerate(songs, 1):
         bodies = "".join(f'<div class="m-mode" data-mode="{m}">{_body(doc, m, unit, view)}</div>' for m in MODES)
@@ -517,7 +547,9 @@ def to_mobile_html(songs: list[tuple[Doc, str]], mode: str, unit: str, opts: Vie
                         f'<div class="m-meta">{escape(meta)}</div>{bodies}{back}</section>')
     modes = "".join(f'<button class="m-btn" type="button" data-set-mode="{m}">{_t(ui, f"m_mode_{m}")}</button>'
                     for m in MODES)
-    bar = (f'<header class="m-bar"><div class="m-row"><div class="m-book">{escape(title)}</div>'
+    book = (f'<a class="m-book" href="#m-toc">{escape(title)}</a>' if many
+            else f'<div class="m-book">{escape(title)}</div>')
+    bar = (f'<header class="m-bar"><div class="m-row">{book}'
            f'<button class="m-btn" type="button" data-act="smaller" aria-label="{_t(ui, "m_smaller")}">A−</button>'
            f'<button class="m-btn" type="button" data-act="bigger" aria-label="{_t(ui, "m_bigger")}">A+</button>'
            f'</div><div class="m-row m-acts">'
