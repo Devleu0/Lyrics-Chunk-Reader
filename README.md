@@ -17,7 +17,7 @@ It runs on a local LLM (Ollama) or a free API (Gemini, Groq, …), and the inter
 - **Listen in the original language**: hear a chunk, a line (▶) or the whole song read by natural neural voices, slowed down if you like, with pauses to repeat after it; export it as MP3 (whole song + one file per line). See [Listen](#listen). Middle-click a chunk opens Naver Dictionary or Jisho · MDBG · Wiktionary.
 - **Lyrics clean-up**: strips `[Chorus]` labels, LRC timestamps, credits and lyrics-site leftovers; opens .txt/.lrc files with encoding detection.
 - **Line editing**: click a line number to retranslate just that line or fix it by hand. Repeated choruses update together.
-- **History**: every fully translated song is kept in a list on the main screen — click it to reopen instantly, without translating again.
+- **History**: every fully translated song is kept in a list on the main screen — click it to reopen instantly, without translating again. Songs still open in a tab even after the app server stops.
 - **Export**: mobile HTML (easy reading on a phone), printable HTML (save as PDF), Markdown, JSON, and a PNG image of the view. Several saved songs can be exported at once (see [Export](#export)).
 - **Works on your phone** over the same Wi-Fi.
 
@@ -78,7 +78,7 @@ For API keys or a default engine, copy `.env.example` to `.env` and fill in what
 
 4. Download results under **Settings → Export** — as files, as an image, or several songs at once (see [Export](#export)). Reopen past songs from **📚 Recent translations** below the lyrics box (see [History](#history)).
 
-Switch the interface language (English / 한국어) with the buttons at the top right. It starts in your browser's language. Engine, model and view settings are remembered in the browser (API keys are never saved, so put them in `.env`).
+Switch the interface language (English / 한국어) with the buttons at the top right. It starts in your browser's language. Engine, model and view settings are remembered in the browser and survive app restarts (API keys are never saved, so put them in `.env`). The settings are encrypted with a key kept in `~/.lyrics-jikdok/settings.key`; deleting it resets them to the defaults.
 
 ## Settings tips
 
@@ -118,6 +118,8 @@ Hear the **original lyrics** to compare your pronunciation.
 - Click a row to open that song **as saved** — no engine is called and nothing is translated again. Press **Translate** if you do want a fresh translation.
 - Only songs with **every line translated** are saved. Stopped translations or songs with failed lines are not; once you fix the failed lines (Edit line), the song is saved.
 - Storage: one JSON file per song in the `history/` folder of the project (override with `LYRICS_HISTORY_DIR`). The same lyrics in the same target language overwrite the earlier file. You can open, back up or delete the files directly; **🗑 Delete the open song from history** removes the open one.
+- **When the app is off**: the open tab keeps a copy of every saved song (only changed songs are sent again). If the server stops, clicking a row still shows the song from that copy, with a notice to restart the app before editing or translating.
+
 ![Recent translations list](docs/images/history-en.png)
 
 - History from earlier versions (kept in the cache DB) is moved into `history/` on first start, but only for songs whose results are complete.
