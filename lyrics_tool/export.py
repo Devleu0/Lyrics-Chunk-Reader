@@ -5,6 +5,7 @@
   FMT_PRINT  : 인쇄·PDF 저장용 HTML (곡마다)
   FMT_MD     : Markdown (곡마다)
   FMT_JSON   : 결과 전체 JSON (곡마다)
+  FMT_ANKI   : 단어장 — Anki에서 바로 가져올 수 있는 탭 구분 텍스트 (곡마다, 어구 하나가 카드 하나)
 이미지(PNG)는 브라우저가 그리므로 여기서 만들지 않는다 (render.to_image_html + app.IMAGE_JS).
 """
 
@@ -17,15 +18,23 @@ from pathlib import Path
 from .core import Doc
 from .i18n import t
 from .langs import lang_name
+from .reading import available, pieces
 from .render import (
-    MODE_SOURCE, ViewOptions, mode_label, to_markdown, to_mobile_html, to_print_html, unit_label,
+    MODE_SOURCE,
+    ViewOptions,
+    mode_label,
+    to_markdown,
+    to_mobile_html,
+    to_print_html,
+    unit_label,
 )
 
 FMT_MOBILE = "mobile"
 FMT_PRINT = "print"
 FMT_MD = "md"
 FMT_JSON = "json"
-FORMATS = [FMT_MOBILE, FMT_PRINT, FMT_MD, FMT_JSON]
+FMT_ANKI = "anki"
+FORMATS = [FMT_MOBILE, FMT_PRINT, FMT_MD, FMT_JSON, FMT_ANKI]
 
 
 def safe_name(name: str) -> str:
@@ -41,6 +50,46 @@ def song_meta(doc: Doc, mode: str, unit: str, ui: str, view: bool = True) -> str
     if mode != MODE_SOURCE:
         parts.append(unit_label(unit, ui))
     return " · ".join(parts)
+
+
+def reading_of(text: str, lang: str) -> str:
+    """어구 전체의 읽기 — 일본어는 히라가나, 중국어는 병음. 읽기를 달 수 없으면 빈 문자열."""
+    if not available(lang):
+        return ""
+    ps = pieces(text, lang)
+    if not any(r for _, r in ps):
+        return ""
+    if lang == "zh":
+        return " ".join(r for _, r in ps if r)
+    return "".join(r or s for s, r in ps)
+
+
+def _cell(text: str) -> str:
+    return " ".join(str(text).replace("\t", " ").split())
+
+
+def to_anki(doc: Doc, ui: str = "en") -> str:
+    """단어장(Anki 가져오기 형식). 같은 어구·같은 뜻은 한 번만 넣고, 처음 나온 줄을 예문으로 단다.
+
+    열: 어구 | 읽기 | 뜻 | 예문(원문 줄) | 예문 직역 | 태그. Anki의 "파일 가져오기"가 머리말(#)을 읽어
+    구분자와 태그 열을 알아서 맞춘다.
+    """
+    tag = "lyrics::" + safe_name(doc.title or "untitled").replace(" ", "_")
+    seen: set[tuple[str, str]] = set()
+    rows = []
+    for r in doc.lines():
+        if r.blank or r.error or r.pending:
+            continue
+        for c in r.chunks:
+            key = (c.s.strip(), c.t.strip())
+            if not key[0] or key in seen:
+                continue
+            seen.add(key)
+            rows.append("\t".join(_cell(x) for x in (c.s, reading_of(c.s, doc.lang), c.t, r.source, r.tr,
+                                                     f"{tag} {doc.lang}-{doc.target}")))
+    cols = "\t".join(t(ui, f"anki_col_{k}") for k in ("front", "reading", "back", "line", "line_tr", "tags"))
+    head = ["#separator:tab", "#html:false", f"#columns:{cols}", "#tags column:6"]
+    return "\n".join(head + rows) + "\n"
 
 
 def _tag(mode: str, unit: str) -> str:
@@ -63,6 +112,8 @@ def song_files(doc: Doc, mode: str, unit: str, opts: ViewOptions, formats=FORMAT
         out[f"{base}_{tag}.md"] = to_markdown(doc, mode, unit, opts)
     if FMT_JSON in formats:
         out[f"{base}_data.json"] = doc.to_json()
+    if FMT_ANKI in formats:
+        out[f"{base}_anki.txt"] = to_anki(doc, ui)
     return out
 
 

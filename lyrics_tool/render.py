@@ -18,6 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from html import escape
 
+from .assets import read as _asset
 from .core import Doc, LineResult, Sentence
 from .i18n import t as _t
 from .reading import DICT_NAVER, DICT_OFF, available, dict_url, ruby_html, ruby_text
@@ -59,73 +60,39 @@ class _Ctx:
     dictionary: str
     ui: str
     tts: bool
+    target: str = ""
 
     @classmethod
-    def make(cls, doc: Doc, mode: str, opts: ViewOptions, tts: bool) -> "_Ctx":
+    def make(cls, doc: Doc, mode: str, opts: ViewOptions, tts: bool) -> _Ctx:
         return cls(mode, opts.hide_translation, doc.lang, opts.reading and available(doc.lang), opts.dictionary,
-                   opts.ui, tts)
+                   opts.ui, tts, doc.target)
+
+    @property
+    def tl(self) -> str:
+        """뜻·직역에 다는 lang 속성 (언어별 글꼴을 고르게)."""
+        return f' lang="{escape(self.target)}"' if self.target else ""
+
+    @property
+    def ul(self) -> str:
+        """안내·오류 문구(화면 언어)에 다는 lang 속성."""
+        return f' lang="{escape(self.ui)}"'
 
     def src(self, text: str) -> str:
         return ruby_html(text, self.lang) if self.ruby else escape(text)
 
 
-CSS = """
-.jk-wrap { font-size: var(--jk-fs, 16px); line-height: 1.5; }
-.jk-line { margin: 0 0 .9em; }
-.jk-sent { margin: 0 0 .9em; padding-left: 8px; border-left: 3px solid rgba(127,127,127,.25); }
-.jk-sent .jk-line { margin: 0 0 .25em; }
-.jk-gap { height: 1.1em; }
-.jk-no { display: inline-block; min-width: 2.2em; opacity: .45; font-size: .75em; vertical-align: top; padding-top: .3em;
-         cursor: pointer; user-select: none; }
-.jk-no:hover { opacity: 1; text-decoration: underline; }
-.jk-empty { opacity: .6; padding: 48px 8px; text-align: center; line-height: 1.8; }
-.jk-nonum .jk-no { display: none; }
-.jk-nonum .jk-tr, .jk-nonum .jk-err { margin-left: 0; }
-.jk-nonum .jk-chunks { max-width: 100%; }
-.jk-chunks { display: inline-flex; flex-wrap: wrap; gap: 4px 6px; vertical-align: top; max-width: calc(100% - 2.4em); }
-.jk-chunk { display: inline-flex; flex-direction: column; padding: 3px 8px; border-radius: 6px;
-            background: rgba(127,127,127,.10); border: 1px solid rgba(127,127,127,.18); }
-.jk-s { font-weight: 600; }
-.jk-t { font-size: .82em; opacity: .75; }
-.jk-src { font-weight: 600; }
-.jk-tr { margin-left: 2.4em; opacity: .85; }
-.jk-err { margin-left: 2.4em; color: #d9534f; font-size: .82em; }
-.jk-pending { opacity: .45; }
-.jk-pending .jk-tr { font-style: italic; }
-.jk-hide .jk-t, .jk-hide .jk-tr:not(.jk-wait) { filter: blur(5px); cursor: pointer; transition: filter .15s; outline: none; }
-.jk-wrap a.jk-s, .jk-wrap a.jk-s:visited { color: inherit !important; text-decoration: none !important; }
-.jk-wrap a.jk-s:hover, .jk-wrap a.jk-s:focus { text-decoration: underline dotted !important; }
-.jk-s[data-tts] { cursor: pointer; border-radius: 3px; }
-.jk-s.jk-speaking { background: rgba(255,170,0,.28); }
-.jk-wrap rt { font-size: .55em; font-weight: 400; opacity: .7; }
-.jk-hide .jk-t:hover, .jk-hide .jk-t:focus, .jk-hide .jk-tr:hover, .jk-hide .jk-tr:focus { filter: none; }
-.jk-play { display: inline-block; width: 1.6em; vertical-align: top; padding-top: .3em; font-size: .72em; opacity: .4;
-           cursor: pointer; user-select: none; text-align: center; border-radius: 4px; }
-.jk-play:hover, .jk-play:focus { opacity: 1; outline: none; }
-.jk-tts .jk-chunks { max-width: calc(100% - 3.6em); }
-.jk-tts.jk-nonum .jk-chunks { max-width: calc(100% - 1.3em); }
-.jk-line.jk-reading > .jk-play, .jk-play.jk-speaking { opacity: 1; color: #e08600; }
-.jk-line.jk-reading { background: rgba(255,170,0,.12); border-radius: 6px; box-shadow: 0 0 0 4px rgba(255,170,0,.12); }
-"""
+CSS = _asset("view.css")
 
-PRINT_CSS = """
-body { font-family: -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", "Noto Sans JP", "Noto Sans SC", sans-serif;
-       color: #111; background: #fff; max-width: 820px; margin: 32px auto; padding: 0 16px; }
-h1 { font-size: 20px; margin: 0 0 4px; }
-.meta { color: #666; font-size: 12px; margin-bottom: 24px; }
-.jk-chunk { background: #f4f4f4; border-color: #ddd; }
-.jk-line, .jk-sent { break-inside: avoid; }
-@media print { body { margin: 0 auto; } .jk-hide .jk-t, .jk-hide .jk-tr { filter: none !important; } }
-"""
+PRINT_CSS = _asset("print.css")
 
 
 def _no(i: int) -> str:
     return f'<span class="jk-no">{i}</span>'
 
 
-def _tr(text: str, hide: bool) -> str:
-    tab = ' tabindex="0"' if hide else ""
-    return f'<div class="jk-tr"{tab}>→ {escape(text)}</div>'
+def _tr(text: str, c: _Ctx) -> str:
+    tab = ' tabindex="0"' if c.hide else ""
+    return f'<div class="jk-tr"{tab}{c.tl}><span class="jk-arrow" aria-hidden="true">→</span> {escape(text)}</div>'
 
 
 def _chunk_src(text: str, c: _Ctx) -> str:
@@ -154,7 +121,7 @@ def _head(r: LineResult, c: _Ctx) -> str:
         tab = ' tabindex="0"' if c.hide else ""
         cards = "".join(
             f'<span class="jk-chunk">{_chunk_src(ch.s, c)}'
-            f'<span class="jk-t"{tab}>{escape(ch.t)}</span></span>'
+            f'<span class="jk-t"{tab}{c.tl}>{escape(ch.t)}</span></span>'
             for ch in r.chunks
         )
         return f'{_no(r.index)}{_play(r, c)}<span class="jk-chunks">{cards}</span>'
@@ -164,10 +131,10 @@ def _head(r: LineResult, c: _Ctx) -> str:
 def _line_html(r: LineResult, c: _Ctx) -> str:
     if r.pending:
         return (f'<div class="jk-line jk-pending">{_head(r, c)}'
-                f'<div class="jk-tr jk-wait">{_t(c.ui, "pending")}</div></div>')
+                f'<div class="jk-tr jk-wait"{c.ul}>{_t(c.ui, "pending")}</div></div>')
     if r.error:
-        return f'<div class="jk-line">{_head(r, c)}<div class="jk-err">⚠ {escape(r.error)}</div></div>'
-    tail = "" if c.mode == MODE_SOURCE else _tr(r.tr, c.hide)
+        return f'<div class="jk-line">{_head(r, c)}<div class="jk-err"{c.ul}>⚠ {escape(r.error)}</div></div>'
+    tail = "" if c.mode == MODE_SOURCE else _tr(r.tr, c)
     return f'<div class="jk-line">{_head(r, c)}{tail}</div>'
 
 
@@ -176,7 +143,7 @@ def _sentence_html(s: Sentence, lines: list[LineResult], c: _Ctx) -> str:
     if s.start == s.end:
         return _line_html(group[0], c)
     heads = "".join(f'<div class="jk-line">{_head(r, c)}</div>' for r in group)
-    tail = f'<div class="jk-err">⚠ {escape(s.error)}</div>' if s.error else _tr(s.tr, c.hide)
+    tail = f'<div class="jk-err"{c.ul}>⚠ {escape(s.error)}</div>' if s.error else _tr(s.tr, c)
     return f'<div class="jk-sent">{heads}{tail}</div>'
 
 
@@ -207,6 +174,7 @@ def _body(doc: Doc, mode: str, unit: str, opts: ViewOptions, tts: bool = True) -
     if tts:
         classes.append("jk-tts")
     lang = f' data-lang="{escape(doc.lang)}" data-no-voice="{_t(opts.ui, "tts_no_voice")}"' if tts else ""
+    lang += f' lang="{escape(doc.lang)}"'
     return (f'<div class="{" ".join(classes)}"{lang} style="--jk-fs:{int(opts.font_size)}px">'
             f'{"".join(rows)}</div>')
 
@@ -225,7 +193,7 @@ def to_print_html(doc: Doc, mode: str, unit: str, opts: ViewOptions | None, titl
         f"<!doctype html><html lang=\"{opts.ui}\"><head><meta charset=\"utf-8\">"
         "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
         f"<title>{escape(title)}</title><style>{CSS}{PRINT_CSS}</style></head><body>"
-        f"<h1>{escape(title)}</h1><div class=\"meta\">{escape(meta)}</div>"
+        f"<h1 class=\"jk-title\" lang=\"{escape(doc.lang)}\">{escape(title)}</h1><div class=\"meta\">{escape(meta)}</div>"
         f"{_body(doc, mode, unit, opts, tts=False)}</body></html>"
     )
 
@@ -234,321 +202,22 @@ def to_print_html(doc: Doc, mode: str, unit: str, opts: ViewOptions | None, titl
 # toast(msg)를 받아 {speak, stop, readAll}을 돌려준다.
 # window.jkServerSay(text, line, el)가 있으면(앱) 서버 음성으로 넘기고, 없으면(모바일 HTML) 브라우저 음성으로 읽는다.
 # 휠 클릭·Ctrl+클릭(폰에서는 길게 누르기)은 막지 않으므로 어구의 href 사전이 열린다.
-TTS_JS = """(toast) => {
-    const tts = window.speechSynthesis;
-    const BCP47 = { en: 'en-US', ja: 'ja-JP', zh: 'zh-CN', ko: 'ko-KR', es: 'es-ES', fr: 'fr-FR', de: 'de-DE',
-                    pt: 'pt-BR', it: 'it-IT', ru: 'ru-RU', vi: 'vi-VN', th: 'th-TH', id: 'id-ID' };
-    const pickVoice = (lang) => {
-        const base = lang.split('-')[0];
-        const voices = tts.getVoices().filter(v => v.lang.replace('_', '-').toLowerCase().split('-')[0] === base);
-        const score = (v) => (/natural|neural|online|google/i.test(v.name) ? 2 : 0)
-                           + (v.lang.replace('_', '-').toLowerCase() === lang.toLowerCase() ? 1 : 0);
-        return voices.sort((a, b) => score(b) - score(a))[0] || null;
-    };
-    tts?.getVoices();  // Chrome은 처음 부를 때 목록을 비동기로 채운다
-    let current = null, run = 0;
-    const mark = (el, on) => {
-        if (!el) return;
-        el.classList.toggle('jk-speaking', on);
-        if (el.classList.contains('jk-play')) el.closest('.jk-line')?.classList.toggle('jk-reading', on);
-    };
-    const stop = () => {
-        run++;
-        tts?.cancel();
-        window.jkServerStop?.();
-        mark(current, false);
-        current = null;
-    };
-    // 브라우저 음성으로 한 번 읽는다. 끝나면 done(ok) — 음성이 없으면 안내하고 false
-    const speak = (el, text, done) => {
-        const wrap = el.closest('.jk-wrap');
-        const code = wrap?.dataset.lang || '';
-        const lang = BCP47[code] || code;
-        const none = wrap?.dataset.noVoice || `No voice for ${lang}`;
-        if (!tts || typeof SpeechSynthesisUtterance === 'undefined') { toast(none); return done?.(false); }
-        const voice = lang && pickVoice(lang);
-        // 목록이 채워졌는데 맞는 음성이 없으면 기본 음성(다른 언어)으로 엉뚱하게 읽으므로 안내만 한다
-        if (lang && !voice && tts.getVoices().length) { toast(none); return done?.(false); }
-        const u = new SpeechSynthesisUtterance(text);
-        if (lang) u.lang = lang;
-        if (voice) u.voice = voice;
-        u.rate = parseFloat(document.documentElement.dataset.rate || '1') || 1;
-        const end = () => { mark(el, false); if (current === el) current = null; done?.(true); };
-        u.onend = end;
-        u.onerror = end;
-        mark(el, true);
-        current = el;
-        tts.speak(u);
-    };
-    const say = (el, text, line) => {
-        const wasSame = current === el;
-        stop();
-        if (wasSame) return;  // 읽는 중에 다시 누르면 멈춤
-        if (window.jkServerSay) { current = el; mark(el, true); return window.jkServerSay(text, line, el); }
-        speak(el, text);
-    };
-    // 서버 음성이 끝났을 때(앱) 표시를 지운다
-    const done = (el) => { mark(el, false); if (current === el) current = null; };
-    document.addEventListener('click', (e) => {
-        const el = e.target.closest('.jk-s[data-tts], .jk-play');
-        if (!el || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
-        e.preventDefault();
-        say(el, el.dataset.tts, el.classList.contains('jk-play') ? el.dataset.line : '');
-    });
-    document.addEventListener('keydown', (e) => {
-        const el = e.target.closest?.('.jk-play');
-        if (el && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); el.click(); }
-    });
-    // 브라우저 음성으로 줄들을 차례로 읽는다(모바일 HTML의 '전체 듣기'). echo면 그 줄 길이만큼 쉬어 따라 해 볼 수 있게
-    const readAll = (plays, echo, onDone) => {
-        stop();
-        const my = run;
-        let i = 0;
-        const next = () => {
-            if (my !== run) return;
-            if (i >= plays.length) return onDone?.();
-            const el = plays[i++];
-            el.scrollIntoView({ block: 'center', behavior: 'smooth' });
-            const t0 = Date.now();
-            speak(el, el.dataset.tts, (ok) => {
-                if (my !== run) return;
-                if (!ok) { stop(); return onDone?.(); }
-                setTimeout(next, echo ? Date.now() - t0 + 500 : 450);
-            });
-        };
-        next();
-    };
-    return { speak, stop, readAll, done };
-}"""
+TTS_JS = _asset("tts.js")
 
 # 폰 폭에 맞추기: 원문 한 줄(끊어읽기 카드 묶음 또는 원문 줄)을 줄바꿈하지 않고, 넘치면 FIT_JS가 그 줄만
 # 글자를 줄인다. 카드 여백·간격을 em으로 두어 글자와 함께 줄어든다. 모바일 HTML과 이미지가 같이 쓴다.
-FIT_CSS = """
-.jk-line { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; }
-.jk-nonum .jk-line { grid-template-columns: minmax(0, 1fr); }
-.jk-tts .jk-line { grid-template-columns: auto auto minmax(0, 1fr); }
-.jk-tts.jk-nonum .jk-line { grid-template-columns: auto minmax(0, 1fr); }
-.jk-tts .jk-line > .jk-chunks, .jk-tts .jk-line > .jk-src { max-width: none; }
-.jk-line > .jk-chunks, .jk-line > .jk-src { min-width: 0; max-width: none; overflow-x: auto; scrollbar-width: none; }
-.jk-line > .jk-tr, .jk-line > .jk-err { grid-column: 1 / -1; margin-left: 0; padding-left: 2em; }
-.jk-nonum .jk-line > .jk-tr, .jk-nonum .jk-line > .jk-err { padding-left: 0; }
-.jk-chunks { flex-wrap: nowrap; gap: .3em; }
-.jk-chunks::-webkit-scrollbar, .jk-src::-webkit-scrollbar { display: none; }
-.jk-chunk { flex: 0 0 auto; padding: .2em .45em; white-space: nowrap; }
-.jk-src { white-space: nowrap; }
-.jk-chunks.jk-tight { gap: .12em; }
-.jk-tight .jk-chunk { padding: .15em .22em; }
-.jk-chunks.jk-multi { flex-wrap: wrap; overflow-x: visible; }
-.jk-multi .jk-chunk { flex: 0 1 auto; min-width: 0; max-width: 100%; white-space: normal;
-                     word-break: keep-all; overflow-wrap: anywhere; }
-.jk-src.jk-multi { white-space: normal; overflow-x: visible; }
-"""
+FIT_CSS = _asset("fit.css")
 
 FIT_MIN = 0.6  # 이보다 더 줄여야 하는 줄은 줄이지 않고 두 줄로 넘긴다
 
 # 넘치는 줄은 먼저 카드 여백·간격을 좁히고(jk-tight), 그래도 넘치면 글자 크기를 줄인다. 원래의 60%보다
 # 작아져야 맞는 긴 줄은 줄이지 않고 원래 크기·간격으로 줄바꿈한다(jk-multi). 읽기와 쓰기를 줄 전체에 몰아서 해
 # 레이아웃 계산을 줄인다. 숨어 있는 줄(다른 보기 방식)은 건너뛴다. 인자: document
-FIT_JS = """(doc) => {
-    const MIN = %MIN%;
-    const els = [...doc.querySelectorAll('.jk-chunks, .jk-wrap .jk-src')];
-    els.forEach(el => { el.style.fontSize = ''; el.classList.remove('jk-tight', 'jk-multi'); });
-    const over0 = els.filter(el => el.getClientRects().length && el.scrollWidth > el.clientWidth + 1);
-    over0.forEach(el => el.classList.add('jk-tight'));
-    const multi = (el) => { el.style.fontSize = ''; el.classList.remove('jk-tight'); el.classList.add('jk-multi'); };
-    let todo = over0;
-    const scale = new Map();
-    for (let pass = 0; pass < 4 && todo.length; pass++) {
-        const over = todo.map(el => [el, el.clientWidth, el.scrollWidth]).filter(([, c, w]) => w > c + 1);
-        todo = [];
-        over.forEach(([el, c, w]) => {
-            const s = (scale.get(el) || 1) * (c / w) * 0.98;
-            if (s < MIN && (pass > 0 || s < MIN * 0.95)) return multi(el);
-            scale.set(el, Math.max(MIN, s));
-            el.style.fontSize = Math.max(MIN, s) + 'em';
-            todo.push(el);
-        });
-    }
-    todo.filter(el => el.scrollWidth > el.clientWidth + 1).forEach(multi);  // 끝까지 넘치면 줄바꿈
-}""".replace("%MIN%", str(FIT_MIN))
+FIT_JS = _asset("fit.js").replace("%MIN%", str(FIT_MIN))
 
-MOBILE_CSS = """
-:root { color-scheme: light dark; --bg: #fff; --fg: #161616; --muted: #6b6b6b; --line: rgba(127,127,127,.22);
-        --bar: rgba(255,255,255,.94); --on: #1a73e8; --on-fg: #fff; }
-@media (prefers-color-scheme: dark) {
-  :root { --bg: #121212; --fg: #ececec; --muted: #9a9a9a; --bar: rgba(18,18,18,.94); --on: #8ab4f8; --on-fg: #111; }
-}
-* { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; }
-body { margin: 0; background: var(--bg); color: var(--fg);
-       font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic",
-                    "Hiragino Sans", "Noto Sans JP", "Noto Sans SC", "Microsoft YaHei", sans-serif; }
-.m-bar { position: sticky; top: 0; z-index: 10; background: var(--bar); backdrop-filter: blur(8px);
-         -webkit-backdrop-filter: blur(8px); border-bottom: 1px solid var(--line);
-         padding: 8px 12px; padding-top: max(8px, env(safe-area-inset-top)); }
-.m-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-.m-row + .m-row { margin-top: 6px; }
-.m-book { flex: 1 1 auto; min-width: 0; font-weight: 700; font-size: 15px; white-space: nowrap; overflow: hidden;
-          text-overflow: ellipsis; }
-.m-btn { font: inherit; font-size: 13px; color: inherit; background: transparent; border: 1px solid var(--line);
-         border-radius: 999px; padding: 6px 11px; min-height: 34px; cursor: pointer; }
-.m-btn[aria-pressed="true"] { background: var(--on); color: var(--on-fg); border-color: var(--on); }
-.m-acts .m-btn { flex: 1 1 0; padding: 6px 4px; white-space: nowrap; }
-.m-seg { display: flex; flex: 1 1 100%; }
-.m-seg .m-btn { flex: 1 1 0; border-radius: 0; margin-left: -1px; padding: 6px 4px; }
-.m-seg .m-btn:first-child { border-radius: 999px 0 0 999px; margin-left: 0; }
-.m-seg .m-btn:last-child { border-radius: 0 999px 999px 0; }
-main { max-width: 720px; margin: 0 auto; padding: 12px 14px calc(48px + env(safe-area-inset-bottom)); }
-.m-menu { width: 38px; padding: 0; font-size: 20px; line-height: 1; }
-/* 곡 목록 서랍: ⋮로 언제든 연다. 곡을 고르면 닫히고 그 곡만 보인다 */
-.m-drawer { position: fixed; inset: 0; z-index: 30; visibility: hidden; transition: visibility 0s .2s; }
-.m-drawer.m-open { visibility: visible; transition: none; }
-.m-shade { position: absolute; inset: 0; background: rgba(0,0,0,.45); opacity: 0; transition: opacity .2s; }
-.m-open .m-shade { opacity: 1; }
-.m-panel { position: absolute; top: 0; right: 0; bottom: 0; width: min(84vw, 340px); display: flex;
-           flex-direction: column; background: var(--bg); border-left: 1px solid var(--line);
-           padding-top: env(safe-area-inset-top); transform: translateX(100%); transition: transform .2s; }
-.m-open .m-panel { transform: none; }
-.m-head { display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 16px;
-          border-bottom: 1px solid var(--line); }
-.m-head b { flex: 1 1 auto; min-width: 0; font-size: 14px; overflow: hidden; text-overflow: ellipsis;
-            white-space: nowrap; }
-.m-toc { flex: 1 1 auto; margin: 0; padding: 0 0 env(safe-area-inset-bottom); list-style: none; overflow-y: auto;
-         overscroll-behavior: contain; }
-.m-toc li + li { border-top: 1px solid var(--line); }
-.m-toc a { display: flex; gap: 8px; padding: 11px 16px; font-size: 14px; color: inherit; text-decoration: none; }
-.m-toc a[aria-current="true"] { color: var(--on); font-weight: 700; }
-.m-toc span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.m-toc small { margin-left: auto; color: var(--muted); white-space: nowrap; }
-body.m-lock { overflow: hidden; }
-.m-many .m-song { display: none; }
-.m-many .m-song.m-cur { display: block; }
-.m-song h2 { font-size: 1.15em; margin: 0 0 2px; }
-.m-meta { color: var(--muted); font-size: 12px; margin-bottom: 14px; }
-.m-nav { display: flex; gap: 8px; margin-top: 24px; }
-.m-nav a { flex: 1 1 0; min-width: 0; padding: 9px 12px; border: 1px solid var(--line); border-radius: 10px;
-           color: inherit; text-decoration: none; font-size: 13px; overflow: hidden; text-overflow: ellipsis;
-           white-space: nowrap; }
-.m-nav small { display: block; color: var(--muted); font-size: 11px; }
-.m-nav .m-next { text-align: right; }
-.m-nav .m-gap { flex: 1 1 0; }
-.jk-wrap { font-size: var(--m-fs, 15px); line-height: 1.5; }
-.jk-line { margin: 0 0 1em; }
-.jk-tr, .jk-err { margin-left: 2em; }
-.jk-no { min-width: 1.9em; }
-.m-mode { display: none; }
-html[data-mode="source"] .m-mode[data-mode="source"], html[data-mode="target"] .m-mode[data-mode="target"],
-html[data-mode="both"] .m-mode[data-mode="both"] { display: block; }
-html.m-hide .jk-t, html.m-hide .jk-tr { filter: blur(5px); transition: filter .15s; cursor: pointer; }
-html.m-hide .m-shown { filter: none; }
-"""
+MOBILE_CSS = _asset("mobile.css")
 
-MOBILE_JS = """
-(() => {
-  const root = document.documentElement;
-  const KEY = 'lyrics-jikdok-mobile';
-  let prefs = {};
-  try { prefs = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch {}
-  const save = () => { try { localStorage.setItem(KEY, JSON.stringify(prefs)); } catch {} };
-  const fs0 = parseInt(root.dataset.fs, 10) || 15;
-  let apply = () => {
-    root.dataset.mode = prefs.mode || root.dataset.mode;
-    root.classList.toggle('m-hide', !!prefs.hide);
-    root.style.setProperty('--m-fs', (prefs.fs || fs0) + 'px');
-    document.querySelectorAll('[data-set-mode]').forEach(b =>
-      b.setAttribute('aria-pressed', String(b.dataset.setMode === root.dataset.mode)));
-    document.querySelector('[data-act="hide"]')?.setAttribute('aria-pressed', String(!!prefs.hide));
-  };
-  document.addEventListener('click', (e) => {
-    const b = e.target.closest('[data-set-mode], [data-act]');
-    if (b) {
-      if (b.dataset.setMode) prefs.mode = b.dataset.setMode;
-      const act = b.dataset.act;
-      if (act === 'hide') { prefs.hide = !prefs.hide; document.querySelectorAll('.m-shown').forEach(x => x.classList.remove('m-shown')); }
-      if (act === 'bigger') prefs.fs = Math.min(32, (prefs.fs || fs0) + 1);
-      if (act === 'smaller') prefs.fs = Math.max(12, (prefs.fs || fs0) - 1);
-      save(); apply(); return;
-    }
-    const gloss = root.classList.contains('m-hide') && e.target.closest('.jk-t, .jk-tr');
-    if (gloss) gloss.classList.toggle('m-shown');  // 가린 뜻은 눌러서 하나씩 확인
-  });
-  const fit = """ + FIT_JS + """;
-  let queued = false;
-  const refit = () => { if (queued) return; queued = true; requestAnimationFrame(() => { queued = false; fit(document); }); };
-  const apply0 = apply;
-  apply = () => { apply0(); refit(); };
-  addEventListener('resize', refit);
-  document.fonts?.ready.then(refit);
-  apply();
-  const toast = (msg) => {
-    document.querySelector('#m-toast')?.remove();
-    const d = Object.assign(document.createElement('div'), { id: 'm-toast', textContent: msg });
-    d.style.cssText = 'position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:99;'
-      + 'max-width:90vw;padding:10px 16px;border-radius:8px;background:rgba(30,30,30,.92);color:#fff;font-size:14px';
-    document.body.appendChild(d);
-    setTimeout(() => d.remove(), 3500);
-  };
-  const tts = (%TTS%)(toast);
-  // 전체 듣기: 화면에 보이는 곡부터 그 곡의 줄을 차례로 읽는다. 다시 누르면 멈춤. '따라 말하기'면 줄마다 그 길이만큼 쉰다
-  const readBtn = document.querySelector('[data-act="readall"]');
-  const echoBtn = document.querySelector('[data-act="echo"]');
-  let reading = false;
-  const setReading = (on) => { reading = on; readBtn?.setAttribute('aria-pressed', String(on)); };
-  echoBtn?.setAttribute('aria-pressed', String(!!prefs.echo));
-  document.addEventListener('click', (e) => {
-    const b = e.target.closest('[data-act="readall"], [data-act="echo"]');
-    if (!b) return;
-    e.stopImmediatePropagation();
-    if (b.dataset.act === 'echo') {
-      prefs.echo = !prefs.echo; save(); b.setAttribute('aria-pressed', String(prefs.echo)); return;
-    }
-    if (reading) { tts.stop(); return setReading(false); }
-    const song = document.querySelector('.m-song.m-cur') || document.querySelector('.m-song');
-    const plays = [...song.querySelectorAll(`.m-mode[data-mode="${root.dataset.mode}"] .jk-play`)];
-    setReading(true);
-    tts.readAll(plays, !!prefs.echo, () => setReading(false));
-  }, true);
-  // 여러 곡: 한 번에 한 곡만 보이고, ⋮ 서랍의 목록이나 곡 끝의 이전·다음으로 바꾼다. 마지막에 본 곡을 기억한다
-  const songs = [...document.querySelectorAll('.m-song')];
-  const drawer = document.getElementById('m-drawer');
-  if (songs.length < 2 || !drawer) return;
-  const links = [...drawer.querySelectorAll('.m-toc a')];
-  const bookEl = document.querySelector('.m-book');
-  const book = document.title;
-  const openDrawer = (on) => {
-    drawer.classList.toggle('m-open', on);
-    document.body.classList.toggle('m-lock', on);
-    drawer.setAttribute('aria-hidden', String(!on));
-    if (on) links.find(a => a.getAttribute('aria-current') === 'true')?.scrollIntoView({ block: 'center' });
-  };
-  const show = (i, top = true) => {
-    i = Math.max(0, Math.min(songs.length - 1, i | 0));
-    if (reading) { tts.stop(); setReading(false); }
-    songs.forEach((s, k) => s.classList.toggle('m-cur', k === i));
-    links.forEach((a, k) => a.setAttribute('aria-current', String(k === i)));
-    bookEl.textContent = songs[i].querySelector('h2').textContent;
-    prefs.last = Object.assign(prefs.last || {}, { [book]: i }); save();
-    // 처음 열 때 주소에 #을 붙이면 브라우저가 그 곡으로 내려가 제목이 막대 밑에 가려진다. 고를 때만 붙인다
-    if (top) { history.replaceState(null, '', '#' + songs[i].id); scrollTo(0, 0); }
-    refit();
-  };
-  const fromHash = () => songs.findIndex(s => '#' + s.id === location.hash);
-  document.addEventListener('click', (e) => {
-    if (e.target.closest('[data-act="menu"]')) return openDrawer(true);
-    if (e.target.closest('[data-act="close"], .m-shade')) return openDrawer(false);
-    const a = e.target.closest('.m-toc a, .m-nav a');
-    if (!a) return;
-    e.preventDefault();
-    show(songs.findIndex(s => '#' + s.id === a.getAttribute('href')));
-    openDrawer(false);
-  });
-  addEventListener('keydown', (e) => { if (e.key === 'Escape') openDrawer(false); });
-  addEventListener('hashchange', () => { const i = fromHash(); if (i >= 0) show(i); });
-  const h = fromHash();
-  show(h >= 0 ? h : (prefs.last || {})[book] || 0, false);
-  if (h >= 0) addEventListener('load', () => setTimeout(() => scrollTo(0, 0), 50));  // #song-N으로 열어도 곡 맨 위에서
-})();
-"""
+MOBILE_JS = _asset("mobile.js").replace("%FIT%", FIT_JS)  # %TTS%는 to_mobile_html이 채운다
 
 
 def to_mobile_html(songs: list[tuple[Doc, str]], mode: str, unit: str, opts: ViewOptions | None,
@@ -564,10 +233,11 @@ def to_mobile_html(songs: list[tuple[Doc, str]], mode: str, unit: str, opts: Vie
     view = ViewOptions(opts.font_size, opts.show_numbers, False, opts.reading, opts.dictionary, ui)
     many = len(songs) > 1
     names = [escape(doc.title or _t(ui, "untitled")) for doc, _ in songs]
+    langs = [escape(doc.lang) for doc, _ in songs]  # 곡 제목은 원문 언어 글꼴로
     drawer = ""
     if many:
         items = "".join(
-            f'<li><a href="#song-{i}"><span>{i}. {names[i - 1]}</span>'
+            f'<li><a href="#song-{i}"><span class="jk-title" lang="{langs[i - 1]}">{i}. {names[i - 1]}</span>'
             f'<small>{sum(1 for s in doc.sources if s.strip())}{escape(_t(ui, "m_lines_suffix"))}</small></a></li>'
             for i, (doc, _) in enumerate(songs, 1))
         drawer = (f'<div class="m-drawer" id="m-drawer" aria-hidden="true"><div class="m-shade"></div>'
@@ -580,8 +250,10 @@ def to_mobile_html(songs: list[tuple[Doc, str]], mode: str, unit: str, opts: Vie
         if not many:
             return ""
         gap = '<span class="m-gap"></span>'
-        prev = f'<a href="#song-{i - 1}"><small>‹ {_t(ui, "m_prev")}</small>{names[i - 2]}</a>' if i > 1 else gap
-        nxt = (f'<a class="m-next" href="#song-{i + 1}"><small>{_t(ui, "m_next")} ›</small>{names[i]}</a>'
+        prev = (f'<a href="#song-{i - 1}"><small>‹ {_t(ui, "m_prev")}</small>'
+                f'<span class="jk-title" lang="{langs[i - 2]}">{names[i - 2]}</span></a>' if i > 1 else gap)
+        nxt = (f'<a class="m-next" href="#song-{i + 1}"><small>{_t(ui, "m_next")} ›</small>'
+               f'<span class="jk-title" lang="{langs[i]}">{names[i]}</span></a>'
                if i < len(songs) else gap)
         return f'<div class="m-nav">{prev}{nxt}</div>'
 
@@ -589,14 +261,15 @@ def to_mobile_html(songs: list[tuple[Doc, str]], mode: str, unit: str, opts: Vie
     for i, (doc, meta) in enumerate(songs, 1):
         bodies = "".join(f'<div class="m-mode" data-mode="{m}">{_body(doc, m, unit, view)}</div>' for m in MODES)
         cur = " m-cur" if i == 1 else ""
-        sections.append(f'<section class="m-song{cur}" id="song-{i}"><h2>{names[i - 1]}</h2>'
+        sections.append(f'<section class="m-song{cur}" id="song-{i}"><h2 class="jk-title" lang="{escape(doc.lang)}">{names[i - 1]}</h2>'
                         f'<div class="m-meta">{escape(meta)}</div>{bodies}{nav(i)}</section>')
     modes = "".join(f'<button class="m-btn" type="button" data-set-mode="{m}">{_t(ui, f"m_mode_{m}")}</button>'
                     for m in MODES)
     menu = (f'<button class="m-btn m-menu" type="button" data-act="menu" aria-label="{_t(ui, "m_toc")}">⋮</button>'
             if many else "")
     head = names[0] if many else escape(title)  # 여러 곡이면 지금 보는 곡 제목(MOBILE_JS가 바꾼다)
-    bar = (f'<header class="m-bar"><div class="m-row"><div class="m-book">{head}</div>'
+    book_lang = f' class="m-book jk-title" lang="{escape(songs[0][0].lang)}"' if songs else ' class="m-book"'
+    bar = (f'<header class="m-bar"><div class="m-row"><div{book_lang}>{head}</div>'
            f'<button class="m-btn" type="button" data-act="smaller" aria-label="{_t(ui, "m_smaller")}">A−</button>'
            f'<button class="m-btn" type="button" data-act="bigger" aria-label="{_t(ui, "m_bigger")}">A+</button>{menu}'
            f'</div><div class="m-row m-acts">'
@@ -617,16 +290,7 @@ def to_mobile_html(songs: list[tuple[Doc, str]], mode: str, unit: str, opts: Vie
 
 IMAGE_WIDTHS = {"phone": 430, "wide": 820}
 
-IMAGE_CSS = """
-.jk-img { box-sizing: border-box; width: %Wpx; padding: 28px 22px 20px; background: %BG; color: %FG;
-          font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic",
-                       "Hiragino Sans", "Yu Gothic", "Noto Sans JP", "Noto Sans SC", "Microsoft YaHei", sans-serif; }
-.jk-img * { box-sizing: border-box; }
-.jk-img h1 { font-size: 21px; line-height: 1.3; margin: 0 0 4px; }
-.jk-img .meta { font-size: 12px; opacity: .6; margin: 0 0 20px; }
-.jk-img .foot { font-size: 11px; opacity: .45; margin-top: 16px; text-align: right; }
-.jk-img .jk-chunk { background: %CHIP; border-color: %CHIPLINE; }
-"""
+IMAGE_CSS = _asset("image.css")
 
 
 def to_image_html(doc: Doc, mode: str, unit: str, opts: ViewOptions | None, title: str, meta: str,
@@ -639,14 +303,16 @@ def to_image_html(doc: Doc, mode: str, unit: str, opts: ViewOptions | None, titl
     opts = opts or ViewOptions()
     view = ViewOptions(opts.font_size, opts.show_numbers, False, opts.reading, DICT_OFF, opts.ui)
     w = IMAGE_WIDTHS.get(width, IMAGE_WIDTHS["phone"])
-    colors = ({"%BG": "#161616", "%FG": "#ececec", "%CHIP": "#262626", "%CHIPLINE": "#3a3a3a"} if dark else
-              {"%BG": "#ffffff", "%FG": "#141414", "%CHIP": "#f3f3f3", "%CHIPLINE": "#dddddd"})
+    colors = ({"%BG": "#161616", "%FG": "#ececec", "%CHIP": "#262626", "%CHIPLINE": "#3a3a3a", "%ACCENT": "#fb923c",
+               "%SOFT": "rgba(251,146,60,.18)", "%ERR": "#ff8a80"} if dark else
+              {"%BG": "#ffffff", "%FG": "#141414", "%CHIP": "#f3f3f3", "%CHIPLINE": "#dddddd", "%ACCENT": "#c2410c",
+               "%SOFT": "rgba(234,88,12,.14)", "%ERR": "#b42318"})
     css = IMAGE_CSS.replace("%W", str(w))
     for k, v in colors.items():
         css = css.replace(k, v)
-    return (f'<div class="jk-img"><style>{CSS}{FIT_CSS}{css}</style><h1>{escape(title)}</h1>'
+    return (f'<div class="jk-img"><style>{CSS}{FIT_CSS}{css}</style><h1 class="jk-title" lang="{escape(doc.lang)}">{escape(title)}</h1>'
             f'<div class="meta">{escape(meta)}</div>{_body(doc, mode, unit, view, tts=False)}'
-            f'<div class="foot">{escape(_t(opts.ui, "app_title"))}</div></div>')
+            f'<div class="foot"><i></i><span>{escape(_t(opts.ui, "app_title"))}</span></div></div>')
 
 
 def to_markdown(doc: Doc, mode: str, unit: str = UNIT_LINE, opts: ViewOptions | None = None) -> str:

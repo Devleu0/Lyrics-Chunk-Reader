@@ -1,0 +1,13 @@
+.jk-img { box-sizing: border-box; width: %Wpx; padding: 24px 22px 18px; background: %BG; color: %FG;
+          border-top: 5px solid %ACCENT;
+          font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic",
+                       "Hiragino Sans", "Yu Gothic", "Noto Sans JP", "Noto Sans SC", "Microsoft YaHei", sans-serif; }
+.jk-img * { box-sizing: border-box; }
+.jk-img h1 { font-size: 21px; line-height: 1.3; margin: 0 0 4px; }
+.jk-img .meta { font-size: 12px; opacity: .6; margin: 0 0 20px; }
+.jk-img .foot { font-size: 11px; margin-top: 18px; padding-top: 10px; border-top: 1px solid %CHIPLINE;
+                display: flex; justify-content: flex-end; align-items: center; gap: 6px; }
+.jk-img .foot span { opacity: .55; }
+.jk-img .foot i { width: 7px; height: 7px; border-radius: 50%; background: %ACCENT; }
+.jk-img .jk-wrap { --jk-accent: %ACCENT; --jk-accent-soft: %SOFT; --jk-err: %ERR; }
+.jk-img .jk-chunk { background: %CHIP; border-color: %CHIPLINE; }

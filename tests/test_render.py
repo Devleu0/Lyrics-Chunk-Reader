@@ -1,6 +1,13 @@
 from lyrics_tool.core import Translator
 from lyrics_tool.render import (
-    MODE_BOTH, MODE_TARGET, MODE_SOURCE, UNIT_LINE, UNIT_SENTENCE, ViewOptions, to_html, to_markdown,
+    MODE_BOTH,
+    MODE_SOURCE,
+    MODE_TARGET,
+    UNIT_LINE,
+    UNIT_SENTENCE,
+    ViewOptions,
+    to_html,
+    to_markdown,
     to_print_html,
 )
 
@@ -38,7 +45,7 @@ def test_view_options():
 def test_print_html_is_standalone():
     page = to_print_html(_doc(), MODE_TARGET, UNIT_SENTENCE, None, "<제목>", "영어 · qwen")
     assert page.startswith("<!doctype html>") and "&lt;제목&gt;" in page
-    assert "@media print" in page and "→ S[I wait &gt; you]" in page
+    assert "@media print" in page and 'aria-hidden="true">→</span> S[I wait &gt; you]' in page
 
 
 def test_line_play_button_only_with_tts():
@@ -47,3 +54,11 @@ def test_line_play_button_only_with_tts():
     assert html.count('class="jk-play"') == 3 and 'data-line="2" data-tts="you"' in html
     page = to_print_html(doc, MODE_BOTH, UNIT_LINE, None, "t")
     assert "jk-play" not in page.split("</style>")[1]
+
+
+def test_lang_attributes_pick_fonts():
+    doc = Translator(FakeBackend()).translate("I wait", "en")
+    html = to_html(doc, MODE_BOTH, UNIT_LINE)
+    assert 'lang="en"' in html.split('class="jk-wrap')[1].split(">")[0]  # 원문 언어
+    assert 'class="jk-t" lang="ko"' in html and 'class="jk-tr" lang="ko"' in html  # 뜻·직역은 번역 언어
+    assert ".jk-wrap :lang(ja)" in html and "Yu Gothic" in html

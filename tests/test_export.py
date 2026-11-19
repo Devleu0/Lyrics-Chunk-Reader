@@ -1,11 +1,21 @@
 import json
 import zipfile
 
-from lyrics_tool.export import FMT_JSON, FMT_MD, FMT_MOBILE, FMT_PRINT, song_files, write_bundle, write_song
+from lyrics_tool.core import Translator
+from lyrics_tool.export import (
+    FMT_ANKI,
+    FMT_JSON,
+    FMT_MD,
+    FMT_MOBILE,
+    FMT_PRINT,
+    song_files,
+    to_anki,
+    write_bundle,
+    write_song,
+)
 from lyrics_tool.render import MODE_BOTH, MODE_SOURCE, UNIT_SENTENCE, ViewOptions, to_image_html, to_mobile_html
 
 from test_core import FakeBackend
-from lyrics_tool.core import Translator
 
 
 def _doc(title, text="I wait >\nyou\n\nbye"):
@@ -16,14 +26,14 @@ def _doc(title, text="I wait >\nyou\n\nbye"):
 
 def test_song_files_has_every_format():
     files = song_files(_doc("A/B"), MODE_BOTH, UNIT_SENTENCE, ViewOptions(ui="ko"))
-    assert sorted(files) == ["A_B_both-sentence.md", "A_B_both-sentence_print.html", "A_B_data.json",
-                             "A_B_mobile.html"]
+    assert sorted(files) == ["A_B_anki.txt", "A_B_both-sentence.md", "A_B_both-sentence_print.html",
+                             "A_B_data.json", "A_B_mobile.html"]
     assert json.loads(files["A_B_data.json"])["lang"] == "en"
 
 
 def test_write_song_mobile_first(tmp_path):
     paths = write_song(_doc("x"), MODE_SOURCE, UNIT_SENTENCE, ViewOptions(), tmp_path)
-    assert paths[0].endswith("x_mobile.html") and len(paths) == 4
+    assert paths[0].endswith("x_mobile.html") and len(paths) == 5
 
 
 def test_mobile_html_holds_all_modes_and_toc():
@@ -34,7 +44,8 @@ def test_mobile_html_holds_all_modes_and_toc():
     assert 'class="m-many"' in page and page.count('class="m-song') == 2 and 'class="m-song m-cur" id="song-1"' in page
     assert 'id="m-drawer"' in page and 'data-act="menu"' in page and 'href="#song-2"' in page
     assert '<div class="m-nav"><span class="m-gap"></span><a class="m-next" href="#song-2">' in page
-    assert '<a href="#song-1"><small>‹ 이전 곡</small>One</a><span class="m-gap"></span>' in page
+    assert ('<a href="#song-1"><small>‹ 이전 곡</small><span class="jk-title" lang="en">One</span></a>'
+            '<span class="m-gap"></span>') in page
     assert 'data-fs="15"' in page
     for m in ("source", "target", "both"):
         assert page.count(f'class="m-mode" data-mode="{m}"') == 2
@@ -67,3 +78,32 @@ def test_bundle_mobile_only_has_no_zip(tmp_path):
     paths = write_bundle([_doc("a")], MODE_SOURCE, UNIT_SENTENCE, ViewOptions(), [FMT_MOBILE], tmp_path, "b")
     assert len(paths) == 1 and paths[0].endswith("b_mobile.html")
     assert write_bundle([], MODE_SOURCE, UNIT_SENTENCE, ViewOptions(), [FMT_PRINT], tmp_path, "b") == []
+
+
+def test_anki_vocab_dedupes_and_has_header():
+    doc = _doc("My Song", "I wait\nI wait\nyou\n\nbye")
+    lines = to_anki(doc, "ko").splitlines()
+    assert lines[:2] == ["#separator:tab", "#html:false"] and lines[2].startswith("#columns:어구\t읽기\t뜻")
+    assert lines[3] == "#tags column:6"
+    cards = [l.split("\t") for l in lines[4:]]
+    assert all(len(c) == 6 for c in cards)
+    assert [c[0] for c in cards] == ["I", "wait", "you", "bye"]  # 반복된 어구는 한 번만
+    assert cards[0][2] == "<I>" and cards[0][3] == "I wait" and cards[0][5] == "lyrics::My_Song en-ko"
+
+
+def test_anki_reading_for_japanese():
+    from lyrics_tool.export import reading_of
+    from lyrics_tool.reading import available
+
+    if not available("ja"):
+        import pytest
+        pytest.skip("fugashi 없음")
+    assert reading_of("君に", "ja") == "きみに"
+    assert reading_of("hello", "en") == ""
+
+
+def test_bundle_with_anki(tmp_path):
+    paths = write_bundle([_doc("One"), _doc("Two", "bye")], MODE_SOURCE, UNIT_SENTENCE, ViewOptions(), [FMT_ANKI],
+                         tmp_path, "Book")
+    with zipfile.ZipFile(paths[0]) as z:
+        assert sorted(z.namelist()) == ["1_One/One_anki.txt", "2_Two/Two_anki.txt"]

@@ -1,0 +1,26 @@
+[project]
+name = "lyrics-jikdok"
+version = "0.2.0"
+description = "Local web app that splits song lyrics into meaning chunks and glosses them for language learners"
+requires-python = ">=3.10"
+license = "MIT"
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+extend-exclude = [".venv", "history"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "I", "UP"]
+# E741: 'l'은 이 프로젝트에서 줄(line)을 뜻하는 관례 이름이다
+# E501: 한·영 문구와 CSS·JS 문자열이 길어 줄 길이는 포매터 기준(120)으로만 맞춘다
+# B905: 길이가 다를 수 있는 zip은 짧은 쪽에 맞추는 것이 의도다
+ignore = ["E741", "E501", "B905"]
+
+[tool.ruff.lint.per-file-ignores]
+# 번역기가 같은 Doc을 갱신해 내보내므로 반복 변수로 다시 받는 것이 의도다
+"app.py" = ["B020"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["lyrics_tool", "app"]
+known-local-folder = ["test_core"]

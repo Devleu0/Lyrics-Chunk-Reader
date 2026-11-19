@@ -151,7 +151,7 @@ async def _synth_one(text: str, voice: str, rate: str) -> bytes:
 
 
 def _cache_path(text: str, voice: str, rate: str) -> Path:
-    key = hashlib.sha1(f"{voice}|{rate}|{text}".encode("utf-8")).hexdigest()
+    key = hashlib.sha1(f"{voice}|{rate}|{text}".encode()).hexdigest()
     return CACHE_DIR / f"{key}.mp3"
 
 

@@ -18,7 +18,7 @@ It runs on a local LLM (Ollama) or a free API (Gemini, Groq, …), and the inter
 - **Lyrics clean-up**: strips `[Chorus]` labels, LRC timestamps, credits and lyrics-site leftovers; opens .txt/.lrc files with encoding detection.
 - **Line editing**: click a line number to retranslate just that line or fix it by hand. Repeated choruses update together.
 - **History**: every fully translated song is kept in a list on the main screen — click it to reopen instantly, without translating again. Songs still open in a tab even after the app server stops.
-- **Export**: mobile HTML (easy reading on a phone), printable HTML (save as PDF), Markdown, JSON, and a PNG image of the view. Several saved songs can be exported at once (see [Export](#export)).
+- **Export**: mobile HTML (easy reading on a phone), printable HTML (save as PDF), Markdown, JSON, a vocabulary list for Anki, and a PNG image of the view. Several saved songs can be exported at once (see [Export](#export)).
 - **Works on your phone** over the same Wi-Fi.
 
 ## Quick start
@@ -89,7 +89,7 @@ Switch the interface language (English / 한국어) with the buttons at the top 
 
 ## Use it on your phone
 
-Run `HOST=0.0.0.0 python app.py` on your PC (PowerShell: `$env:HOST = "0.0.0.0"` then `.venv\Scripts\python.exe app.py`) and open `http://<your PC's IP>:7860` in your phone's browser on the same Wi-Fi. Anyone on the network can connect, so don't do this on public Wi-Fi.
+Run `HOST=0.0.0.0 python app.py` on your PC (PowerShell: `$env:HOST = "0.0.0.0"` then `.venv\Scripts\python.exe app.py`) and open `http://<your PC's IP>:7860` in your phone's browser on the same Wi-Fi. Anyone on the network can connect, so set a login with `LYRICS_AUTH=user:password` (in `.env` or the environment); without it the app logs a warning. Don't do this on public Wi-Fi.
 
 <img src="docs/images/mobile-en.png" alt="Phone view" width="300">
 
@@ -97,7 +97,8 @@ Run `HOST=0.0.0.0 python app.py` on your PC (PowerShell: `$env:HOST = "0.0.0.0"`
 
 Under **Settings → Export**. Every file follows the current view settings (view mode, literal unit, pronunciation, line numbers).
 
-- **Open song**: mobile HTML · printable HTML · Markdown · JSON are ready to download as soon as a song is shown.
+- **Open song**: mobile HTML · printable HTML · Markdown · JSON · Anki vocabulary are ready to download as soon as a song is shown.
+- **Vocabulary for Anki (.txt)**: one card per chunk — chunk, reading (kana or pinyin), meaning, the line it came from and its literal translation, tagged with the song. Repeated chunks appear once. In Anki, use **File → Import**; the header lines set the separator and tag column for you.
 - **🖼 Save as image (PNG)**: draws the open song as one long image, at phone width or wide, light or dark. Your browser draws it with its own fonts (no extra libraries, works offline), so pronunciation and chunk cards look like the screen. Hidden translations are shown in the image.
 - **Mobile HTML**: one self-contained file for reading on a phone. A bar at the top switches between chunks / literal / both, hides meanings for self-testing (tap a meaning to peek), and changes the text size (15 px to start); your choices are remembered on that phone. Each lyric line stays on one row: long lines get tighter and smaller, and only lines that would drop below 60% wrap (a chunk longer than the screen wraps inside its card, so the page never scrolls sideways). Tap a chunk or a line's ▶ to hear it, or **▶ Listen** to read the song line by line (**Repeat gaps** leaves time to repeat each line) — this uses the phone's own voices. Long-press a chunk to open the dictionary link. Follows the phone's dark mode.
 - **🎧 Make MP3**: the open song read in the original language — one MP3 of the whole song and a ZIP with one MP3 per line (`01_first words.mp3` …), using the Listen settings.
@@ -159,11 +160,14 @@ lyrics_tool/
   render.py             HTML/Markdown rendering per view mode and unit (screen, print, mobile, image)
   export.py             export files for one song or several (ZIP, mobile book)
   speech.py             original-language audio (edge-tts), MP3 joining, per-line timings
+  assets/               CSS and browser scripts for the screen, mobile HTML and image export
 tests/                  tests with a fake engine (python -m pytest)
+.github/workflows/      CI: ruff, pytest on Windows and Linux (Python 3.10 and 3.13)
+tools/screenshots/      rebuilds the README screenshots: demo history (no engine calls) + headless Chrome
 start.bat               Windows launcher (checks Ollama → starts the app → opens the browser)
 ```
 
-Tests: `python -m pip install pytest`, then `python -m pytest`.
+Development: `python -m pip install -r requirements-dev.txt`, then `python -m ruff check .` and `python -m pytest`. With Node installed, the tests also syntax-check the browser scripts. Exported and audio files are kept in the system temp folder and removed after a week.
 
 ## Notes
 

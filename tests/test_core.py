@@ -5,9 +5,15 @@ import pytest
 from lyrics_tool.backends import Backend, BackendError, RefusalError
 from lyrics_tool.cache import Cache
 from lyrics_tool.core import (
-    SegLine, Chunk, Translator, detect_language, normalize_sentences, parse_response, split_segments,
+    Chunk,
+    SegLine,
+    Translator,
+    detect_language,
+    normalize_sentences,
+    parse_response,
+    split_segments,
 )
-from lyrics_tool.render import MODE_TARGET, MODE_SOURCE, UNIT_LINE, UNIT_SENTENCE, to_html, to_markdown
+from lyrics_tool.render import MODE_SOURCE, MODE_TARGET, UNIT_LINE, UNIT_SENTENCE, to_html, to_markdown
 
 
 class FakeBackend(Backend):

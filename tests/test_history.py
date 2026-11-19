@@ -101,3 +101,14 @@ def test_default_title_truncates():
     assert default_title("\n\n" + "a" * 40) == "a" * 30 + "…"
     assert default_title("") == "Untitled"
     assert time.time() > 0
+
+
+def test_rejects_ids_outside_folder(tmp_path):
+    import pytest
+
+    h = History(tmp_path / "h")
+    for bad in ["../x", "..\\x", "C:evil", "a/b", ".hidden", "", "x\x00y", None]:
+        with pytest.raises(KeyError):
+            h.load(bad)
+        with pytest.raises(KeyError):
+            h.delete(bad)
