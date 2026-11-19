@@ -19,11 +19,11 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterator
 from dataclasses import asdict, dataclass, field
 from difflib import SequenceMatcher
-from typing import Iterator
 
-from .backends import Backend, BackendError, RefusalError
+from .backends import Backend, RefusalError
 from .cache import Cache, make_key
 from .i18n import t as _t
 from .langs import LANGS, detect_language
@@ -68,7 +68,7 @@ class SegResult:
         }
 
     @classmethod
-    def from_dict(cls, d: dict) -> "SegResult":
+    def from_dict(cls, d: dict) -> SegResult:
         lines = [
             SegLine([Chunk(**c) for c in l["chunks"]], l["tr"], l.get("error", ""))
             for l in d["lines"]
@@ -193,7 +193,7 @@ class Doc:
         }
 
     @classmethod
-    def restore(cls, d: dict) -> "Doc":
+    def restore(cls, d: dict) -> Doc:
         return cls(
             lang=d["lang"],
             sources=list(d["sources"]),

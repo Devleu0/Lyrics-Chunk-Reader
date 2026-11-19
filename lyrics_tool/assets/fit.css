@@ -1,0 +1,18 @@
+.jk-line { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; }
+.jk-nonum .jk-line { grid-template-columns: minmax(0, 1fr); }
+.jk-tts .jk-line { grid-template-columns: auto auto minmax(0, 1fr); }
+.jk-tts.jk-nonum .jk-line { grid-template-columns: auto minmax(0, 1fr); }
+.jk-tts .jk-line > .jk-chunks, .jk-tts .jk-line > .jk-src { max-width: none; }
+.jk-line > .jk-chunks, .jk-line > .jk-src { min-width: 0; max-width: none; overflow-x: auto; scrollbar-width: none; }
+.jk-line > .jk-tr, .jk-line > .jk-err { grid-column: 1 / -1; margin-left: 0; padding-left: 2em; }
+.jk-nonum .jk-line > .jk-tr, .jk-nonum .jk-line > .jk-err { padding-left: 0; }
+.jk-chunks { flex-wrap: nowrap; gap: .3em; }
+.jk-chunks::-webkit-scrollbar, .jk-src::-webkit-scrollbar { display: none; }
+.jk-chunk { flex: 0 0 auto; padding: .2em .45em; white-space: nowrap; }
+.jk-src { white-space: nowrap; }
+.jk-chunks.jk-tight { gap: .12em; }
+.jk-tight .jk-chunk { padding: .15em .22em; }
+.jk-chunks.jk-multi { flex-wrap: wrap; overflow-x: visible; }
+.jk-multi .jk-chunk { flex: 0 1 auto; min-width: 0; max-width: 100%; white-space: normal;
+                     word-break: keep-all; overflow-wrap: anywhere; }
+.jk-src.jk-multi { white-space: normal; overflow-x: visible; }

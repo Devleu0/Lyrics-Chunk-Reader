@@ -57,5 +57,5 @@ def test_read_file_encodings(tmp_path):
     zh = "夜空中最亮的星\n能否听清\n那仰望的人\n心底的孤独和叹息"
     p.write_bytes(zh.encode("gb18030"))
     assert read_lyrics_file(p) == zh
-    p.write_bytes("﻿hello".encode("utf-8"))
+    p.write_bytes("﻿hello".encode())
     assert read_lyrics_file(p) == "hello"

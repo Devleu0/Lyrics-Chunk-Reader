@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import secrets
 import tempfile
@@ -20,22 +21,45 @@ from pathlib import Path
 import gradio as gr
 import pandas as pd
 
+from lyrics_tool import speech
+from lyrics_tool.assets import read as _asset
 from lyrics_tool.backends import (
-    BACKENDS, GEMINI_DEFAULT_MODEL, OLLAMA_DEFAULT_MODEL, BackendError, OllamaBackend, make_backend,
+    BACKENDS,
+    GEMINI_DEFAULT_MODEL,
+    OLLAMA_DEFAULT_MODEL,
+    BackendError,
+    OllamaBackend,
+    make_backend,
 )
 from lyrics_tool.cache import Cache, default_title
 from lyrics_tool.cleanup import clean_lyrics, read_lyrics_file
-from lyrics_tool.history import History, import_from_cache
 from lyrics_tool.core import (
-    Doc, EditError, LineNotFound, Translator, apply_edit, chunks_to_text, sentence_of, text_to_chunks,
+    Doc,
+    EditError,
+    LineNotFound,
+    Translator,
+    apply_edit,
+    chunks_to_text,
+    sentence_of,
+    text_to_chunks,
 )
+from lyrics_tool.export import FMT_MOBILE, FORMATS, safe_name, song_meta, write_bundle, write_song
+from lyrics_tool.history import History, import_from_cache
 from lyrics_tool.i18n import UI_LANGS, pick_ui, t
 from lyrics_tool.langs import LANGS, detect_language, lang_name
 from lyrics_tool.reading import DICT_INTL, DICT_NAVER, DICTS
-from lyrics_tool import speech
-from lyrics_tool.export import FMT_MOBILE, FORMATS, safe_name, song_meta, write_bundle, write_song
 from lyrics_tool.render import (
-    FIT_JS, IMAGE_WIDTHS, MODE_SOURCE, MODES, TTS_JS, UNIT_LINE, UNITS, ViewOptions, mode_label, to_html, to_image_html,
+    FIT_JS,
+    IMAGE_WIDTHS,
+    MODE_SOURCE,
+    MODES,
+    TTS_JS,
+    UNIT_LINE,
+    UNITS,
+    ViewOptions,
+    mode_label,
+    to_html,
+    to_image_html,
     unit_label,
 )
 
@@ -183,6 +207,24 @@ def _status_line(doc: Doc, ui: str, engine_name: str, model: str, note: str = ""
 
 
 EXPORT_DIR = Path(tempfile.gettempdir()) / "lyrics-jikdok"
+EXPORT_MAX_AGE = 7 * 24 * 3600  # 내보낸 파일·음성은 일주일 뒤 앱을 켤 때 지운다
+
+
+def prune_exports(folder: Path | None = None, max_age: float = EXPORT_MAX_AGE, now: float | None = None) -> int:
+    """임시 폴더에 쌓인 오래된 내보내기 파일을 지우고 지운 개수를 돌려준다. 지우지 못한 파일은 건너뛴다."""
+    folder = folder or EXPORT_DIR
+    if not folder.is_dir():
+        return 0
+    limit = (now or time.time()) - max_age
+    n = 0
+    for p in folder.rglob("*"):
+        try:
+            if p.is_file() and p.stat().st_mtime < limit:
+                p.unlink()
+                n += 1
+        except OSError:
+            continue
+    return n
 
 
 def _export(doc: Doc | None, mode, unit, opts: ViewOptions) -> list[str] | None:
@@ -204,8 +246,11 @@ def export_many(ids, formats, *view):
         raise gr.Error(t(ui, "many_pick"))
     if not formats:
         raise gr.Error(t(ui, "many_no_format"))
+    known = {e.id for e in get_history().list(limit=100_000)}  # 직접 입력한 값은 무시한다
     docs = []
     for entry_id in ids:
+        if entry_id not in known:
+            continue
         try:
             docs.append(get_history().load(entry_id)[0])
         except (OSError, KeyError, ValueError):
@@ -645,167 +690,10 @@ def save_settings(ui, target, engine, model, base_url, batch, retries, mode, uni
 
 # ---------------------------------------------------------------- 화면
 
-APP_CSS = """
-.gradio-container { overflow: clip !important; }  /* hidden이면 툴바 sticky가 동작하지 않는다 */
-#jk-main { max-width: 1000px; margin: 0 auto; width: 100%; }
-#jk-header { align-items: flex-start; flex-wrap: nowrap; }
-#jk-header > :first-child { flex: 1 1 auto !important; min-width: 0 !important; }
-#jk-header > :last-child { flex: 0 0 auto !important; width: auto !important; min-width: 0 !important; }
-#jk-head h2 { margin: 0 0 2px; }
-#jk-head p { margin: 0; opacity: .7; font-size: .9em; }
-#jk-toolbar { position: sticky; top: 0; z-index: 20; background: var(--body-background-fill);
-              padding: 6px 2px; border-bottom: 1px solid var(--border-color-primary);
-              gap: 6px 12px; align-items: center; flex-wrap: wrap; }
-#jk-toolbar > *, #jk-input-opts > *, #jk-img-opts > * { flex: 0 1 auto !important; width: auto !important; min-width: 0 !important;
-                                      max-width: 100%; }  /* 폰에서 라디오 묶음이 넘치지 않고 줄바꿈 */
-#jk-input-opts, #jk-img-opts { flex-wrap: wrap; gap: 6px 12px; align-items: center; }
-#jk-status { font-size: .85em; opacity: .85; min-height: 1.4em; }
-#jk-status p { margin: 2px 0; }
-#jk-viewer { padding: 4px 2px 64px; }
-#jk-hidden { display: none !important; }
-#jk-audio { position: fixed; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 50; display: none;
-            align-items: center; gap: 8px; max-width: min(96vw, 640px); padding: 6px 8px 6px 14px; border-radius: 999px;
-            background: var(--background-fill-primary); border: 1px solid var(--border-color-primary);
-            box-shadow: 0 4px 18px rgba(0,0,0,.25); }
-#jk-audio.jk-on { display: flex; }
-#jk-audio .jk-audio-title { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden;
-                            text-overflow: ellipsis; max-width: 30vw; }
-#jk-audio audio { height: 36px; min-width: 0; flex: 1 1 320px; }
-#jk-audio button { border: 0; background: transparent; color: inherit; font-size: 16px; cursor: pointer; padding: 4px 8px; }
-"""
+APP_CSS = _asset("app.css")
 
 # 뷰어의 줄 번호를 누르면 오른쪽 '줄 수정'에 그 줄을 불러온다. Ctrl/Cmd+Enter로 번역.
-APP_JS = """() => {
-    document.addEventListener('keydown', (e) => {
-        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-            const b = document.querySelector('#jk-translate');
-            if (b) { e.preventDefault(); b.click(); }
-        }
-    });
-    document.addEventListener('click', (e) => {
-        const no = e.target.closest('.jk-no');
-        const input = document.querySelector('#jk-line-no input');
-        if (!no || !input) return;
-        input.value = no.textContent.trim();
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-        setTimeout(() => document.querySelector('#jk-load-line')?.click(), 80);
-    });
-    const toast = (msg) => {
-        document.querySelector('#jk-toast')?.remove();
-        const d = Object.assign(document.createElement('div'), { id: 'jk-toast', textContent: msg });
-        d.style.cssText = 'position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:9999;'
-            + 'max-width:min(90vw,480px);padding:10px 16px;border-radius:8px;background:rgba(30,30,30,.92);'
-            + 'color:#fff;font-size:14px;box-shadow:0 4px 16px rgba(0,0,0,.3)';
-        document.body.appendChild(d);
-        setTimeout(() => d.remove(), 3500);
-    };
-    // 오프라인 사본: 서버가 미리 보내 둔 곡별 HTML(offline_pack_file). 히스토리 줄을 눌렀는데 서버가 꺼져 있으면
-    // 이 사본을 뷰어에 그린다. 서버가 살아 있으면 평소처럼 서버가 연다.
-    // 예전 버전은 곡 HTML을 이벤트 값으로 보내 Gradio run history(localStorage)를 수 MB씩 채웠다. 그 기록을 지운다.
-    try {
-        for (const k of Object.keys(localStorage)) {
-            if (k.startsWith('gradio:run-history') && localStorage.getItem(k).includes('"/offline_pack"')) {
-                localStorage.removeItem(k);
-            }
-        }
-    } catch {}
-    const offline = { songs: {}, msg: '' };
-    window.jkOffline = (p) => {
-        if (!p) return;
-        if (p.reset) offline.songs = {};
-        Object.assign(offline.songs, p.add || {});
-        const keep = new Set(p.ids || []);
-        for (const id of Object.keys(offline.songs)) if (!keep.has(id)) delete offline.songs[id];
-        offline.msg = p.msg || offline.msg;
-    };
-    const serverUp = async () => {
-        const ctl = new AbortController();
-        const timer = setTimeout(() => ctl.abort(), 1500);
-        try { return (await fetch('config', { cache: 'no-store', signal: ctl.signal })).ok; }
-        catch { return false; }
-        finally { clearTimeout(timer); }
-    };
-    document.addEventListener('click', (e) => {
-        const row = e.target.closest('#jk-history-table [role=row], #jk-history-table tbody tr');
-        if (!row) return;
-        const cells = [...row.querySelectorAll('[role=gridcell], td')].map(td => td.textContent.trim());
-        const song = Object.values(offline.songs).find(s => cells.includes(s.title) && cells.includes(s.when));
-        const wrap = document.querySelector('#jk-viewer .jk-wrap');
-        if (!song || !wrap) return;
-        // 서버가 살아 있으면 Gradio가 그리게 둔다. 꺼졌을 때만 Gradio가 관리하는 뷰어 DOM을 직접 바꾼다.
-        serverUp().then(up => {
-            if (up) return;
-            wrap.parentElement.innerHTML = song.html;
-            if (offline.msg) toast(offline.msg);
-        });
-    }, true);
-    // 듣기 (render.TTS_JS): 어구·줄은 숨은 칸(#jk-say)에 요청을 적고 버튼을 눌러 서버 음성(edge-tts)을 받는다.
-    // 곡 전체는 아래쪽 재생 막대로 틀고, 재생 위치에 맞춰 지금 읽는 줄을 강조한다.
-    const tts = (""" + TTS_JS + """)(toast);
-    window.jkTts = tts;
-    window.jkToast = toast;
-    const bar = Object.assign(document.createElement('div'), { id: 'jk-audio' });
-    bar.innerHTML = '<span class="jk-audio-title"></span><audio controls preload="auto"></audio>'
-                  + '<button type="button" aria-label="close">✕</button>';
-    document.body.appendChild(bar);
-    const audio = bar.querySelector('audio');
-    let sayId = 0, sayEl = null, timings = [], lastLine = 0;
-    const clearReading = () => document.querySelectorAll('#jk-viewer .jk-reading')
-        .forEach(x => x.classList.remove('jk-reading'));
-    window.jkServerSay = (text, line, el) => {
-        const box = document.querySelector('#jk-say textarea, #jk-say input');
-        if (!box) return;
-        sayEl = el;
-        box.value = JSON.stringify({ id: ++sayId, text, line: line ? Number(line) : 0 });
-        box.dispatchEvent(new Event('input', { bubbles: true }));
-        setTimeout(() => document.querySelector('#jk-say-btn')?.click(), 60);
-    };
-    window.jkServerStop = () => {
-        sayId++;
-        audio.pause();
-        timings = [];
-        clearReading();
-        bar.classList.remove('jk-on');
-    };
-    const showLine = (n) => {
-        if (n === lastLine) return;
-        lastLine = n;
-        clearReading();
-        const play = document.querySelector(`#jk-viewer .jk-play[data-line="${n}"]`);
-        const line = play?.closest('.jk-line');
-        if (!line) return;
-        line.classList.add('jk-reading');
-        const r = line.getBoundingClientRect();
-        if (r.top < 80 || r.bottom > innerHeight - 90) line.scrollIntoView({ block: 'center', behavior: 'smooth' });
-    };
-    audio.addEventListener('timeupdate', () => {
-        if (!timings.length) return;
-        const t = audio.currentTime;
-        const cur = timings.find(x => t >= x.start && t < x.end + 0.15);
-        if (cur) showLine(cur.line);
-        else if (lastLine) { lastLine = 0; clearReading(); }
-    });
-    audio.addEventListener('ended', () => {
-        if (sayEl) tts.done(sayEl);
-        sayEl = null;
-        if (timings.length) { lastLine = 0; clearReading(); }
-    });
-    bar.querySelector('button').addEventListener('click', () => tts.stop());
-    // 요청한 뒤 한참 지나도 재생되지 않으면(서버 오류 등) '읽는 중' 표시를 지운다
-    window.jkSayCheck = () => { if (sayEl && audio.paused) { tts.done(sayEl); sayEl = null; } };
-    // 서버가 돌려준 음성 재생. p: {id, kind: 'say' | 'song', title, lines: [{line, start, end}]}
-    window.jkPlay = (f, p) => {
-        if (!f?.url || !p) return;
-        if (p.kind === 'say' && p.id !== sayId) return;  // 그 사이 다른 곳을 눌렀다
-        if (p.kind === 'song') { tts.stop(); sayEl = null; }
-        timings = p.lines || [];
-        lastLine = 0;
-        bar.querySelector('.jk-audio-title').textContent = p.title || '';
-        bar.classList.toggle('jk-on', p.kind === 'song');
-        audio.src = f.url;
-        audio.play().catch(() => {});
-    };
-}"""
+APP_JS = _asset("app.js").replace("%TTS%", TTS_JS)
 
 PLAY_JS = "(f, p) => { window.jkPlay?.(f, p); }"
 SAY_CHECK_JS = "() => { setTimeout(() => window.jkSayCheck?.(), 15000); }"
@@ -813,51 +701,29 @@ SAY_CHECK_JS = "() => { setTimeout(() => window.jkSayCheck?.(), 15000); }"
 # 이미지로 저장: image_source가 넘긴 조각 HTML을 숨긴 iframe에서 재어 높이를 구하고, SVG foreignObject로 감싸
 # 캔버스에 그린 뒤 PNG로 내려받는다. 외부 라이브러리 없이 브라우저만으로 그리므로 오프라인에서도 된다.
 # 캔버스 한계(iOS는 약 1600만 화소, 한 변 3만 2천 화소)를 넘지 않게 배율을 줄인다.
-IMAGE_JS = """async (f) => {
-    if (!f?.url) return;
-    const p = await (await fetch(f.url)).json();
-    const frame = document.createElement('iframe');
-    frame.style.cssText = `position:fixed;left:-20000px;top:0;width:${p.width}px;height:100px;border:0;`;
-    document.body.appendChild(frame);
-    try {
-        const d = frame.contentDocument;
-        d.open();
-        d.write('<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0">' + p.html
-                + '</body></html>');
-        d.close();
-        await d.fonts?.ready;
-        (""" + FIT_JS + """)(d);  // 한 줄이 폭을 넘으면 그 줄만 줄인다 (render.FIT_CSS)
-        const node = d.body.firstElementChild;
-        const w = p.width, h = Math.ceil(node.getBoundingClientRect().height);
-        const xhtml = new XMLSerializer().serializeToString(node);
-        const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">`
-                  + `<foreignObject x="0" y="0" width="${w}" height="${h}">${xhtml}</foreignObject></svg>`;
-        const img = new Image();
-        await new Promise((ok, bad) => {
-            img.onload = ok; img.onerror = bad;
-            img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
-        });
-        const scale = Math.max(0.5, Math.min(2, Math.sqrt(16e6 / (w * h)), 32000 / h));
-        const c = document.createElement('canvas');
-        c.width = Math.round(w * scale);
-        c.height = Math.round(h * scale);
-        const ctx = c.getContext('2d');
-        ctx.scale(scale, scale);
-        ctx.drawImage(img, 0, 0, w, h);
-        const blob = await new Promise(r => c.toBlob(r, 'image/png'));
-        if (!blob) throw new Error('empty canvas');
-        const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: p.name });
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        setTimeout(() => URL.revokeObjectURL(a.href), 10000);
-    } catch (e) {
-        console.error(e);
-        alert(p.fail);
-    } finally {
-        frame.remove();
-    }
-}"""
+IMAGE_JS = _asset("image.js").replace("%FIT%", FIT_JS)
+
+
+LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
+
+def launch_options(env=None) -> dict:
+    """HOST·LYRICS_AUTH 환경변수 → launch() 인자.
+
+    HOST=0.0.0.0처럼 다른 기기에서 접속할 수 있게 열 때는 LYRICS_AUTH=아이디:비밀번호로 로그인을 걸 수 있다.
+    로그인 없이 열면 같은 네트워크의 누구나 히스토리를 지우거나 번역(=API 사용량)을 요청할 수 있으므로 경고한다.
+    """
+    env = os.environ if env is None else env
+    host = env.get("HOST", "127.0.0.1").strip() or "127.0.0.1"
+    opts: dict = {"server_name": host}
+    user, sep, password = (env.get("LYRICS_AUTH") or "").partition(":")
+    if sep and user and password:
+        opts["auth"] = (user, password)
+    elif host not in LOCAL_HOSTS:
+        logging.getLogger(__name__).warning(
+            "HOST=%s: anyone on this network can open the app. Set LYRICS_AUTH=user:password to require a login.",
+            host)
+    return opts
 
 
 def collapse_input(lyrics, title, ui):
@@ -1017,12 +883,14 @@ def build_ui() -> gr.Blocks:
             pack = gr.File(visible=False)
 
             with gr.Row(elem_id="jk-toolbar"):
-                mode = L(gr.Radio(mode_choices(ui0), value=MODE_SOURCE, show_label=False, container=False),
+                mode = L(gr.Radio(mode_choices(ui0), value=MODE_SOURCE, show_label=False, container=False,
+                                  elem_classes="jk-seg"),
                          choices=mode_choices)
                 unit = L(gr.Radio(unit_choices(ui0), value=UNIT_LINE, show_label=False, container=False,
-                                  visible=False), choices=unit_choices)
-                reading = L(gr.Checkbox(True, label=t(ui0, "reading"), container=False), label="reading")
-                hide = L(gr.Checkbox(False, label=t(ui0, "hide"), container=False), label="hide")
+                                  visible=False, elem_classes="jk-seg"), choices=unit_choices)
+                reading = L(gr.Checkbox(True, label=t(ui0, "reading"), container=False, elem_classes="jk-toggle"),
+                            label="reading")
+                hide = L(gr.Checkbox(False, label=t(ui0, "hide"), container=False, elem_classes="jk-toggle"), label="hide")
                 listen_btn = L(gr.Button(t(ui0, "listen_all"), size="sm", scale=0), value="listen_all")
                 edit_toggle = L(gr.Button(t(ui0, "edit_toggle"), size="sm", scale=0), value="edit_toggle")
             status = gr.Markdown(elem_id="jk-status")
@@ -1087,9 +955,12 @@ def build_ui() -> gr.Blocks:
 
         # 원어 듣기 — 어구·줄은 숨은 칸으로, 곡 전체는 툴바 버튼으로. 받은 MP3는 브라우저(jkPlay)가 튼다
         S = [voice, rate]
-        say_btn.click(say, [doc_state, say_req, *S, ui], [audio_file, audio_info], show_progress="hidden")             .success(None, [audio_file, audio_info], None, js=PLAY_JS)
+        say_btn.click(say, [doc_state, say_req, *S, ui], [audio_file, audio_info], show_progress="hidden") \
+            .success(None, [audio_file, audio_info], None, js=PLAY_JS)
         say_btn.click(None, None, None, js=SAY_CHECK_JS)  # 실패하면 '읽는 중' 표시를 지운다
-        listen_btn.click(lambda u: gr.Info(t(u, "tts_making")), ui)             .then(listen_song, [doc_state, *S, gap, ui], [audio_file, audio_info], show_progress="hidden")             .success(None, [audio_file, audio_info], None, js=PLAY_JS)
+        listen_btn.click(lambda u: gr.Info(t(u, "tts_making")), ui) \
+            .then(listen_song, [doc_state, *S, gap, ui], [audio_file, audio_info], show_progress="hidden") \
+            .success(None, [audio_file, audio_info], None, js=PLAY_JS)
         mp3_btn.click(export_mp3, [doc_state, *S, gap, ui], mp3_files)
         many_btn.click(export_many, [many, many_fmt, *V], many_files)
 
@@ -1113,8 +984,7 @@ def build_ui() -> gr.Blocks:
 
 
 if __name__ == "__main__":
-    import logging
-
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
     _load_dotenv()
-    build_ui().launch(server_name=os.environ.get("HOST", "127.0.0.1"), css=APP_CSS)
+    prune_exports()
+    build_ui().launch(**launch_options(), css=APP_CSS)

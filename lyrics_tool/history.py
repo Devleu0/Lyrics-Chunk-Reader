@@ -19,6 +19,7 @@ from .core import Doc
 
 DEFAULT_DIR = Path(__file__).resolve().parent.parent / "history"
 FORMAT = 1
+_ID = re.compile(r'[^\\/:*?"<>|\x00-\x1f]{1,120}')
 
 
 def default_dir() -> Path:
@@ -47,7 +48,7 @@ def _slug(title: str) -> str:
 
 
 def song_hash(lyrics: str, target: str) -> str:
-    return hashlib.sha256(f"{target}\n{lyrics.strip()}".encode("utf-8")).hexdigest()[:8]
+    return hashlib.sha256(f"{target}\n{lyrics.strip()}".encode()).hexdigest()[:8]
 
 
 class History:
@@ -55,9 +56,17 @@ class History:
         self.dir = Path(folder).expanduser() if folder else default_dir()
 
     def _path(self, entry_id: str) -> Path:
-        if not re.fullmatch(r"[^\\/]+", entry_id):  # 폴더 밖 경로 차단
+        """id → 파일 경로. 폴더 밖을 가리킬 수 있는 id는 KeyError.
+
+        _slug가 만드는 id에는 경로 구분자·드라이브 콜론·제어 문자가 없고 '.'로 시작하지 않는다.
+        Windows에서는 'C:x'처럼 콜론만 있어도 폴더 밖(그 드라이브의 현재 폴더)이 되므로 함께 막는다.
+        """
+        if not isinstance(entry_id, str) or not _ID.fullmatch(entry_id) or entry_id.startswith("."):
             raise KeyError(entry_id)
-        return self.dir / f"{entry_id}.json"
+        path = self.dir / f"{entry_id}.json"
+        if path.resolve().parent != self.dir.resolve():
+            raise KeyError(entry_id)
+        return path
 
     def save(self, doc: Doc, engine: str, model: str, batch: int, saved: float | None = None) -> str | None:
         """끝까지 번역된 문서만 저장하고 항목 id를 돌려준다. 미완성이면 저장하지 않고 None."""

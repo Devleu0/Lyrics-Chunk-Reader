@@ -1,0 +1,56 @@
+/* 색: 앱·모바일 HTML·이미지·인쇄가 같은 강조색(주황)을 쓴다. 바깥에서 --jk-accent 등을 바꿔 테마를 맞춘다 */
+.jk-wrap { --jk-accent: #c2410c; --jk-accent-soft: rgba(234,88,12,.14); --jk-err: #b42318;
+           --jk-card: rgba(127,127,127,.09); --jk-card-line: rgba(127,127,127,.22);
+           font-size: var(--jk-fs, 16px); line-height: 1.5; }
+/* 글꼴: 원문·뜻에 lang을 달아 언어마다 맞는 글꼴을 고른다. 없으면 한국어 Windows에서 일본어가 맑은 고딕으로
+   그려져 가나 자간이 벌어지고, 한자가 한국식 자형으로 나온다 */
+.jk-wrap:lang(ja), .jk-wrap :lang(ja), .jk-title:lang(ja) {
+  font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Yu Gothic", "Meiryo", "Noto Sans JP",
+               "Noto Sans CJK JP", sans-serif; }
+.jk-wrap:lang(zh), .jk-wrap :lang(zh), .jk-title:lang(zh) {
+  font-family: "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", "Noto Sans CJK SC", sans-serif; }
+.jk-wrap:lang(ko), .jk-wrap :lang(ko), .jk-title:lang(ko) {
+  font-family: "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", "Noto Sans CJK KR", sans-serif;
+  word-break: keep-all; }
+.jk-line { margin: 0 0 .9em; }
+.jk-sent { margin: 0 0 .9em; padding-left: 8px; border-left: 3px solid var(--jk-accent-soft); }
+.jk-sent .jk-line { margin: 0 0 .25em; }
+.jk-gap { height: 1.1em; }
+.jk-no { display: inline-block; min-width: 2.2em; opacity: .62; font-size: .75em; vertical-align: top; padding-top: .3em;
+         cursor: pointer; user-select: none; font-variant-numeric: tabular-nums; }
+.jk-no:hover { opacity: 1; color: var(--jk-accent) !important; text-decoration: underline; }
+.jk-empty { opacity: .6; padding: 48px 8px; text-align: center; line-height: 1.8; }
+.jk-nonum .jk-no { display: none; }
+.jk-nonum .jk-tr, .jk-nonum .jk-err { margin-left: 0; }
+.jk-nonum .jk-chunks { max-width: 100%; }
+.jk-chunks { display: inline-flex; flex-wrap: wrap; gap: 4px 6px; vertical-align: top; max-width: calc(100% - 2.4em); }
+.jk-chunk { display: inline-flex; flex-direction: column; padding: 3px 9px 4px; border-radius: 8px;
+            background: var(--jk-card); border: 1px solid var(--jk-card-line);
+            transition: border-color .12s, background-color .12s; }
+.jk-tts .jk-chunk:has(.jk-s:hover) { border-color: var(--jk-accent); }
+.jk-chunk:has(.jk-speaking) { border-color: var(--jk-accent); background: var(--jk-accent-soft); }
+.jk-s { font-weight: 600; }
+.jk-t { font-size: .82em; opacity: .78; }
+.jk-src { font-weight: 600; }
+.jk-tr { margin-left: 2.4em; opacity: .88; }
+/* 색 규칙의 !important: 앱에서는 Gradio의 '.prose *' 글자색이 더 구체적이라 그대로 두면 덮인다 */
+.jk-arrow { color: var(--jk-accent) !important; font-weight: 600; }
+.jk-err { margin-left: 2.4em; color: var(--jk-err) !important; font-size: .82em; }
+.jk-pending { opacity: .45; }
+.jk-pending .jk-tr { font-style: italic; }
+.jk-hide .jk-t, .jk-hide .jk-tr:not(.jk-wait) { filter: blur(5px); cursor: pointer; transition: filter .15s; outline: none; }
+.jk-wrap a.jk-s, .jk-wrap a.jk-s:visited { color: inherit !important; text-decoration: none !important; }
+.jk-wrap a.jk-s:hover, .jk-wrap a.jk-s:focus { text-decoration: underline dotted !important; }
+.jk-s[data-tts] { cursor: pointer; border-radius: 3px; }
+.jk-wrap rt { font-size: .55em; font-weight: 400; opacity: .72; }
+.jk-hide .jk-t:hover, .jk-hide .jk-t:focus, .jk-hide .jk-tr:hover, .jk-hide .jk-tr:focus { filter: none; }
+.jk-play { display: inline-block; width: 1.6em; vertical-align: top; padding-top: .3em; font-size: .72em; opacity: .55;
+           cursor: pointer; user-select: none; text-align: center; border-radius: 4px; }
+.jk-play:hover, .jk-play:focus { opacity: 1; color: var(--jk-accent) !important; outline: none; }
+/* 키보드로 옮겨 다닐 때만 초점 테두리를 보인다 */
+.jk-wrap :focus-visible { outline: 2px solid var(--jk-accent) !important; outline-offset: 2px; }
+.jk-tts .jk-chunks { max-width: calc(100% - 3.6em); }
+.jk-tts.jk-nonum .jk-chunks { max-width: calc(100% - 1.3em); }
+.jk-line.jk-reading > .jk-play, .jk-play.jk-speaking { opacity: 1; color: var(--jk-accent) !important; }
+.jk-line.jk-reading { background: var(--jk-accent-soft); border-radius: 8px; box-shadow: 0 0 0 4px var(--jk-accent-soft); }
+@media (prefers-reduced-motion: reduce) { .jk-chunk, .jk-hide .jk-t, .jk-hide .jk-tr { transition: none; } }
