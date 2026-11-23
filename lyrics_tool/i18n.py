@@ -211,7 +211,7 @@ S: dict[str, tuple[str, str]] = {
     "sent_tr_range": ("Sentence translation (lines {a}–{b})", "문장 직역 ({a}~{b}줄)"),
     "retrans": ("Retranslate this line", "이 줄 다시 번역"),
     "save": ("Save edit", "수정 저장"),
-    "retry_all": ("Retranslate all failed lines", "실패한 줄 모두 다시 번역"),
+    "retry_all": ("Continue / retranslate failed lines", "이어서 번역·실패한 줄 다시 번역"),
     "line_head": ("**Line {n}** `{src}`", "**{n}줄** `{src}`"),
     "line_pending": ("**Line {n}** `{src}` — not translated yet.", "**{n}줄** `{src}` — 아직 번역되지 않았습니다."),
     "line_grouped": ("Lines {a}–{b} form one sentence. Retranslating translates the whole sentence.",
@@ -232,7 +232,13 @@ S: dict[str, tuple[str, str]] = {
     "fb_retrying": ("Retrying failed lines with the fallback engine ({name} `{model}`)…",
                     "보조 엔진({name} `{model}`)으로 실패한 줄 재시도 중…"),
     "fb_done": ("Fallback engine translated {fixed}/{failed} lines.", "보조 엔진으로 {fixed}/{failed}줄을 번역했습니다."),
-    "stopped": ("⏹ Stopped. Finished parts are kept.", "⏹ 중단했습니다. 번역된 부분까지는 유지됩니다."),
+    "stopped": ("⏹ Stopped. Finished parts are saved to Recent translations (⏸) — open it there and press "
+                "“Continue / retranslate failed lines” to do only the rest.",
+                "⏹ 중단했습니다. 번역된 부분은 최근 번역에 ⏸로 저장됩니다. 거기서 열어 "
+                "‘이어서 번역·실패한 줄 다시 번역’을 누르면 남은 부분만 합니다."),
+    "history_partial": ("⏸ Translation was interrupted. Press “Continue / retranslate failed lines” to finish "
+                        "only the remaining parts.",
+                        "⏸ 번역이 중간에 멈춘 곡입니다. ‘이어서 번역·실패한 줄 다시 번역’을 누르면 남은 부분만 번역합니다."),
     "retranslated": ("Retranslated line {n}.", "{n}줄을 다시 번역했습니다."),
     "saved": ("Saved your edit to line {n}.", "{n}줄 수정 내용을 저장했습니다."),
     "retrying": ("Retrying failed lines…", "실패한 줄 재시도 중…"),

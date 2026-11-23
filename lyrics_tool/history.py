@@ -1,4 +1,4 @@
-"""번역 히스토리 — 끝까지 제대로 번역된 곡만 곡마다 JSON 파일 하나로 저장한다.
+"""번역 히스토리 — 끝까지 제대로 번역된 곡(과 중간에 멈춰 이어할 곡)을 곡마다 JSON 파일 하나로 저장한다.
 
 위치: 기본 <프로젝트>/history/ (환경변수 LYRICS_HISTORY_DIR로 변경). 파일을 직접 열어 보거나 지워도 된다.
 파일 이름: <제목>-<가사·번역 언어 해시 8자리>.json — 같은 가사를 같은 언어로 다시 번역하면 덮어쓴다.
@@ -36,6 +36,7 @@ class Entry:
     model: str
     lines: int
     saved: float
+    partial: bool = False  # 번역이 중간에 멈춘 곡 — 열어서 이어서 번역할 수 있다
 
     @property
     def when(self) -> str:
@@ -68,9 +69,13 @@ class History:
             raise KeyError(entry_id)
         return path
 
-    def save(self, doc: Doc, engine: str, model: str, batch: int, saved: float | None = None) -> str | None:
-        """끝까지 번역된 문서만 저장하고 항목 id를 돌려준다. 미완성이면 저장하지 않고 None."""
-        if not doc.complete:
+    def save(self, doc: Doc, engine: str, model: str, batch: int, saved: float | None = None,
+             partial: bool = False) -> str | None:
+        """끝까지 번역된 문서를 저장하고 항목 id를 돌려준다. 미완성이면 저장하지 않고 None.
+
+        partial=True이면 일부 구간만 끝난 문서(중간에 멈춘 번역)도 저장한다 — 나중에 열어 남은 구간만 이어서 번역한다.
+        """
+        if not doc.complete and not (partial and doc.results and doc.pending_keys()):
             return None
         lyrics = "\n".join(doc.sources)
         h = song_hash(lyrics, doc.target)
@@ -93,7 +98,8 @@ class History:
                 doc = d["doc"]
                 out.append(Entry(p.stem, doc.get("title") or p.stem, doc["lang"], doc.get("target", "ko"),
                                  d.get("engine", ""), d.get("model", ""),
-                                 sum(1 for s in doc["sources"] if s.strip()), float(d.get("saved", p.stat().st_mtime))))
+                                 sum(1 for s in doc["sources"] if s.strip()), float(d.get("saved", p.stat().st_mtime)),
+                                 any(s["key"] not in doc["results"] for s in doc["segments"])))
             except (OSError, ValueError, KeyError, TypeError):
                 continue  # 손상되었거나 다른 파일은 건너뛴다
         out.sort(key=lambda e: e.saved, reverse=True)

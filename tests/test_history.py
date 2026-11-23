@@ -112,3 +112,23 @@ def test_rejects_ids_outside_folder(tmp_path):
             h.load(bad)
         with pytest.raises(KeyError):
             h.delete(bad)
+
+
+def test_partial_save_is_listed_and_resumable(tmp_path):
+    h = History(tmp_path)
+    tr = Translator(FakeBackend())
+    doc = tr.prepare("one\n\ntwo", "en")
+    doc.title = "Half"
+    assert h.save(doc, "ollama", "m", 8, partial=True) is None  # 아직 끝난 구간이 없으면 저장하지 않음
+    next(tr.run(doc))
+    assert h.save(doc, "ollama", "m", 8) is None  # 기본은 완성된 곡만
+    entry_id = h.save(doc, "ollama", "m", 8, partial=True)
+    assert [(e.id, e.partial) for e in h.list()] == [(entry_id, True)]
+
+    loaded, _ = h.load(entry_id)
+    fb = FakeBackend()
+    for _ in Translator(fb).retry_failed(loaded):
+        pass
+    assert fb.calls == [["two"]] and loaded.complete  # 남은 구간만 번역
+    assert h.save(loaded, "ollama", "m", 8) == entry_id  # 같은 항목을 완성본으로 덮어씀
+    assert [e.partial for e in h.list()] == [False]
