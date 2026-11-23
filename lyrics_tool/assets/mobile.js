@@ -31,8 +31,29 @@
   const refit = () => { if (queued) return; queued = true; requestAnimationFrame(() => { queued = false; fit(document); }); };
   const apply0 = apply;
   apply = () => { apply0(); refit(); };
-  addEventListener('resize', refit);
+  // 스크롤 중 주소창이 접히면 높이만 바뀌는 resize가 발생한다. 그때 다시 맞추면 글자 크기·페이지 길이가 흔들리므로 너비가 바뀔 때만 맞춘다
+  let lastW = document.documentElement.clientWidth;
+  addEventListener('resize', () => {
+    const w = document.documentElement.clientWidth;
+    if (w !== lastW) { lastW = w; refit(); }
+  });
   document.fonts?.ready.then(refit);
+  // 상단바: 아래로 스크롤하면 숨기고, 위로 올리면(또는 맨 위면) 보인다
+  const bar = document.querySelector('.m-bar');
+  if (bar) {
+    let lastY = scrollY, ticking = false;
+    addEventListener('scroll', () => {
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(() => {
+        ticking = false;
+        const y = Math.max(0, scrollY), dy = y - lastY;
+        if (y < 60 || dy < -6) bar.classList.remove('m-away');
+        else if (dy > 6 && !document.body.classList.contains('m-lock')) bar.classList.add('m-away');
+        if (Math.abs(dy) > 6) lastY = y;
+      });
+    }, { passive: true });
+  }
   apply();
   const toast = (msg) => {
     document.querySelector('#m-toast')?.remove();

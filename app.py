@@ -238,6 +238,16 @@ def format_choices(ui):
     return [(t(ui, f"fmt_{f}"), f) for f in FORMATS]
 
 
+def source_langs(ui):
+    return [(lang_name(c, ui), c) for c in LANGS]
+
+
+def songs_in_langs(codes):
+    """고른 언어(가사 원어)로 저장된 곡의 id. 히스토리 순서를 따른다."""
+    codes = set(codes or [])
+    return [e.id for e in get_history().list(limit=100_000) if e.lang in codes]
+
+
 def export_many(ids, formats, *view):
     """히스토리에서 고른 곡들을 한꺼번에 내보낸다 (저장된 결과 그대로, 엔진을 부르지 않음)."""
     mode, unit, opts = _view(*view)
@@ -819,6 +829,9 @@ def build_ui() -> gr.Blocks:
                 many = L(gr.Dropdown([], value=[], multiselect=True, allow_custom_value=True,
                                      label=t(ui0, "many_songs"), info=t(ui0, "many_info")),
                          label="many_songs", info="many_info")
+                many_lang = L(gr.Dropdown(source_langs(ui0), value=[], multiselect=True,
+                                          label=t(ui0, "many_by_lang"), info=t(ui0, "many_by_lang_info")),
+                              label="many_by_lang", info="many_by_lang_info", choices=source_langs)
                 many_fmt = L(gr.CheckboxGroup(format_choices(ui0), value=[FMT_MOBILE], label=t(ui0, "many_formats")),
                              label="many_formats", choices=format_choices)
                 with gr.Row():
@@ -952,6 +965,7 @@ def build_ui() -> gr.Blocks:
         img_btn.click(image_source, [doc_state, img_width, img_dark, *V], img_src, show_progress="hidden") \
             .success(None, img_src, None, js=IMAGE_JS)
         many_all.click(lambda ids: list(ids), hist_ids, many)
+        many_lang.input(songs_in_langs, many_lang, many)
 
         # 원어 듣기 — 어구·줄은 숨은 칸으로, 곡 전체는 툴바 버튼으로. 받은 MP3는 브라우저(jkPlay)가 튼다
         S = [voice, rate]
