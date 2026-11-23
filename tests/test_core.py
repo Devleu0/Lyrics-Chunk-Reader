@@ -153,6 +153,22 @@ def test_cache_hit_skips_backend_and_skips_failed():
     assert doc.lines()[0].tr == "KO ok"
 
 
+def test_interrupted_run_resumes_with_only_remaining_segments():
+    cache = Cache(":memory:")
+    lyrics = "one\n\ntwo\n\nthree"
+    tr = Translator(FakeBackend(), cache=cache)
+    doc = tr.prepare(lyrics, "en")
+    run = tr.run(doc)
+    next(run)  # 첫 구간만 끝내고 중단(제너레이터를 버림)
+    run.close()
+    assert len(cache) == 1
+
+    fb = FakeBackend()
+    doc2 = Translator(fb, cache=cache).translate(lyrics, "en")
+    assert fb.calls == [["two"], ["three"]]  # 끝낸 구간은 다시 부르지 않는다
+    assert doc2.progress() == (3, 3)
+
+
 def test_cache_key_depends_on_model():
     cache = Cache(":memory:")
     Translator(FakeBackend(), cache=cache).translate("x", "en")

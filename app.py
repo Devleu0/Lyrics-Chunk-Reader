@@ -245,7 +245,7 @@ def source_langs(ui):
 def songs_in_langs(codes):
     """고른 언어(가사 원어)로 저장된 곡의 id. 히스토리 순서를 따른다."""
     codes = set(codes or [])
-    return [e.id for e in get_history().list(limit=100_000) if e.lang in codes]
+    return [e.id for e in get_history().list(limit=100_000) if e.lang in codes and not e.partial]
 
 
 def export_many(ids, formats, *view):
@@ -256,7 +256,7 @@ def export_many(ids, formats, *view):
         raise gr.Error(t(ui, "many_pick"))
     if not formats:
         raise gr.Error(t(ui, "many_no_format"))
-    known = {e.id for e in get_history().list(limit=100_000)}  # 직접 입력한 값은 무시한다
+    known = {e.id for e in get_history().list(limit=100_000) if not e.partial}  # 직접 입력한 값은 무시한다
     docs = []
     for entry_id in ids:
         if entry_id not in known:
@@ -381,14 +381,23 @@ def history_dir_label() -> str:
 def history_view(ui, current_title=""):
     """(표, 행별 id, 히스토리 칸, 빈 목록 안내, 여러 곡 내보내기 목록 update)"""
     entries = get_history().list()
-    picks = [(f"{e.title} · {lang_name(e.lang, ui)}→{lang_name(e.target, ui)} · {e.when}", e.id) for e in entries]
+    picks = [(f"{e.title} · {lang_name(e.lang, ui)}→{lang_name(e.target, ui)} · {e.when}", e.id)
+             for e in entries if not e.partial]  # 멈춘 곡은 이어서 끝낸 뒤에 내보낸다
     cols = [t(ui, k) for k in ("col_title", "col_langs", "col_lines", "col_model", "col_saved")]
-    rows = [[e.title, f"{lang_name(e.lang, ui)} → {lang_name(e.target, ui)}", e.lines, e.model, e.when]
+    rows = [[("⏸ " if e.partial else "") + e.title, f"{lang_name(e.lang, ui)} → {lang_name(e.target, ui)}", e.lines, e.model, e.when]
             for e in entries]
     label = t(ui, "history_current", n=len(entries), title=current_title) if current_title \
         else t(ui, "history_count", n=len(entries))
     return (gr.update(value=pd.DataFrame(rows, columns=cols), visible=bool(entries)), [e.id for e in entries],
             gr.update(label=label), gr.update(visible=not entries), gr.update(choices=picks))
+
+
+def _save_progress(doc: Doc, engine, model, batch) -> None:
+    """구간이 끝날 때마다 히스토리에 저장해 둔다 — 중단하거나 닫아도 나중에 남은 구간만 이어서 번역한다."""
+    try:
+        get_history().save(doc, engine, model, int(batch), partial=True)
+    except OSError:
+        pass
 
 
 def _save_history(doc: Doc, engine, model, batch, ui) -> str:
@@ -451,6 +460,7 @@ def run_translate(lyrics, title, lang, target, auto_clean, engine, model, api_ke
 
     try:
         for doc in tr.run(doc):
+            _save_progress(doc, engine, tr.backend.model, batch)
             yield gr.update(), to_html(doc, mode, unit, opts), _status(doc, tr, t(ui, "translating")), doc, None
 
         fb = make_fallback(fb_engine, fb_model, engine, api_key, base_url, batch, retries, target, ui)
@@ -547,6 +557,7 @@ def retry_all(doc, engine, model, api_key, base_url, batch, retries, *view):
     tr = make_translator(engine, model, api_key, base_url, batch, retries, doc.target, ui)
     try:
         for doc in tr.retry_failed(doc):
+            _save_progress(doc, engine, tr.backend.model, batch)
             yield to_html(doc, mode, unit, opts), _status(doc, tr, t(ui, "retrying")), doc, None
     except BackendError as e:
         yield to_html(doc, mode, unit, opts), _status(doc, tr, f"⚠ {e}"), doc, _export(doc, mode, unit, opts)
@@ -600,8 +611,10 @@ def open_history(ids, ui, mode, unit, font, numbers, hide, reading, dictionary, 
         raise gr.Error(t(ui, "history_missing")) from e
     when = time.strftime("%Y-%m-%d %H:%M", time.localtime(meta.get("saved", 0)))
     kind = meta.get("engine", "")
-    status = _status_line(doc, ui, t(ui, f"engine_{kind}") if kind in BACKENDS else kind, meta.get("model", ""),
-                          t(ui, "history_opened", when=when))
+    note = t(ui, "history_opened", when=when)
+    if doc.pending_keys():
+        note += "\n\n" + t(ui, "history_partial")
+    status = _status_line(doc, ui, t(ui, f"engine_{kind}") if kind in BACKENDS else kind, meta.get("model", ""), note)
     n = sum(1 for line in doc.sources if line.strip())
     return (to_html(doc, mode, unit, opts), status, doc, _export(doc, mode, unit, opts), ids[row],
             meta.get("lyrics", "\n".join(doc.sources)), doc.title, doc.lang, doc.target,
@@ -629,7 +642,7 @@ def offline_pack(sent, mode, unit, font, numbers, hide, reading, dictionary, ui)
     have = {} if reset else dict(sent["have"])
     add = {}
     history = get_history()
-    entries = history.list()
+    entries = [e for e in history.list() if not e.partial]
     for e in entries:
         if have.get(e.id) == e.saved:
             continue
@@ -964,7 +977,7 @@ def build_ui() -> gr.Blocks:
         # 내보내기 — 이미지는 브라우저가 그린다. 여러 곡은 히스토리에 저장된 결과로 만든다
         img_btn.click(image_source, [doc_state, img_width, img_dark, *V], img_src, show_progress="hidden") \
             .success(None, img_src, None, js=IMAGE_JS)
-        many_all.click(lambda ids: list(ids), hist_ids, many)
+        many_all.click(lambda: [e.id for e in get_history().list(limit=100_000) if not e.partial], None, many)
         many_lang.input(songs_in_langs, many_lang, many)
 
         # 원어 듣기 — 어구·줄은 숨은 칸으로, 곡 전체는 툴바 버튼으로. 받은 MP3는 브라우저(jkPlay)가 튼다
