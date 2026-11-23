@@ -12,6 +12,8 @@ body { margin: 0; background: var(--bg); color: var(--fg);
 .m-bar { position: sticky; top: 0; z-index: 10; background: var(--bar); backdrop-filter: blur(8px);
          -webkit-backdrop-filter: blur(8px); border-bottom: 1px solid var(--line);
          padding: 8px 12px; padding-top: max(8px, env(safe-area-inset-top)); }
+.m-bar { transition: transform .2s ease; }
+.m-bar.m-away { transform: translateY(-100%); }  /* 내려 읽는 동안 숨김, 올리면 다시 나타남. transform이라 페이지 길이는 안 변한다 */
 .m-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .m-row + .m-row { margin-top: 6px; }
 .m-book { flex: 1 1 auto; min-width: 0; font-weight: 700; font-size: 15px; white-space: nowrap; overflow: hidden;
