@@ -17,7 +17,7 @@ It runs on a local LLM (Ollama) or a free API (Gemini, Groq, …), and the inter
 - **Listen in the original language**: hear a chunk, a line (▶) or the whole song read by natural neural voices, slowed down if you like, with pauses to repeat after it; export it as MP3 (whole song + one file per line). See [Listen](#listen). Middle-click a chunk opens Naver Dictionary or Jisho · MDBG · Wiktionary.
 - **Lyrics clean-up**: strips `[Chorus]` labels, LRC timestamps, credits and lyrics-site leftovers; opens .txt/.lrc files with encoding detection.
 - **Line editing**: click a line number to retranslate just that line or fix it by hand. Repeated choruses update together.
-- **History**: every fully translated song is kept in a list on the main screen — click it to reopen instantly, without translating again. Songs still open in a tab even after the app server stops.
+- **History**: every fully translated song is kept in a list on the main screen — click it to reopen instantly, without translating again. Songs still open in a tab even after the app server stops. A translation you stop halfway is kept too (⏸) and can be continued later.
 - **Export**: mobile HTML (easy reading on a phone), printable HTML (save as PDF), Markdown, JSON, a vocabulary list for Anki, and a PNG image of the view. Several saved songs can be exported at once (see [Export](#export)).
 - **Works on your phone** over the same Wi-Fi.
 
@@ -62,7 +62,7 @@ For API keys or a default engine, copy `.env.example` to `.env` and fill in what
 
 1. Paste lyrics or open a **file** (.txt/.lrc), choose the source language (auto-detect by default) and the target (→ English, …), then press **Translate** (Ctrl/Cmd+Enter).
    - The input panel collapses when translation starts, and the viewer fills in stanza by stanza.
-   - Press **Stop** if it takes too long. Finished parts are kept, and translating again only sends the rest thanks to the cache.
+   - Press **Stop** if it takes too long. Finished parts are saved to history as ⏸; open it and press **Continue / retranslate failed lines** to translate only the rest (translating again also reuses the cache).
 2. Switch views from the viewer toolbar (no retranslation).
 
    | Source order (chunks) | Target order (literal) |
@@ -100,9 +100,9 @@ Under **Settings → Export**. Every file follows the current view settings (vie
 - **Open song**: mobile HTML · printable HTML · Markdown · JSON · Anki vocabulary are ready to download as soon as a song is shown.
 - **Vocabulary for Anki (.txt)**: one card per chunk — chunk, reading (kana or pinyin), meaning, the line it came from and its literal translation, tagged with the song. Repeated chunks appear once. In Anki, use **File → Import**; the header lines set the separator and tag column for you.
 - **🖼 Save as image (PNG)**: draws the open song as one long image, at phone width or wide, light or dark. Your browser draws it with its own fonts (no extra libraries, works offline), so pronunciation and chunk cards look like the screen. Hidden translations are shown in the image.
-- **Mobile HTML**: one self-contained file for reading on a phone. A bar at the top switches between chunks / literal / both, hides meanings for self-testing (tap a meaning to peek), and changes the text size (15 px to start); your choices are remembered on that phone. Each lyric line stays on one row: long lines get tighter and smaller, and only lines that would drop below 60% wrap (a chunk longer than the screen wraps inside its card, so the page never scrolls sideways). Tap a chunk or a line's ▶ to hear it, or **▶ Listen** to read the song line by line (**Repeat gaps** leaves time to repeat each line) — this uses the phone's own voices. Long-press a chunk to open the dictionary link. Follows the phone's dark mode.
+- **Mobile HTML**: one self-contained file for reading on a phone. A bar at the top (it hides as you scroll down and returns as you scroll up) switches between chunks / literal / both, hides meanings for self-testing (tap a meaning to peek), and changes the text size (15 px to start); your choices are remembered on that phone. Each lyric line stays on one row: long lines get tighter and smaller, and only lines that would drop below 60% wrap (a chunk longer than the screen wraps inside its card, so the page never scrolls sideways). Tap a chunk or a line's ▶ to hear it, or **▶ Listen** to read the song line by line (**Repeat gaps** leaves time to repeat each line) — this uses the phone's own voices. Long-press a chunk to open the dictionary link. Follows the phone's dark mode.
 - **🎧 Make MP3**: the open song read in the original language — one MP3 of the whole song and a ZIP with one MP3 per line (`01_first words.mp3` …), using the Listen settings.
-- **Several songs at once**: pick songs from your saved history (in the order you want, or **Select all**) and the formats. Mobile HTML puts every song into one file and shows one song at a time: **⋮** in the top bar slides in the song list whenever you need it, **Previous / Next** at the end of a song moves on, and the file reopens at the song you read last; the other formats go into a ZIP with one folder per song. Songs are exported as saved — nothing is translated again.
+- **Several songs at once**: pick songs from your saved history (in the order you want, **Select all**, or **Select by language** to take every song written in the chosen languages) and the formats. Mobile HTML puts every song into one file and shows one song at a time: **⋮** in the top bar slides in the song list whenever you need it, **Previous / Next** at the end of a song moves on, and the file reopens at the song you read last; the other formats go into a ZIP with one folder per song. Songs are exported as saved — nothing is translated again.
 
 <img src="docs/images/export-panel-en.png" alt="Export panel" width="180"> <img src="docs/images/export-mobile-en.png" alt="Mobile HTML on a phone" width="220"> <img src="docs/images/export-drawer-en.png" alt="Song list opened with ⋮" width="220"> <img src="docs/images/export-image-en.png" alt="Saved PNG image" width="280">
 
@@ -121,7 +121,7 @@ Hear the **original lyrics** to compare your pronunciation.
 
 - The **📚 Recent translations** list under the lyrics box loads by itself when the page opens and refreshes after each translation.
 - Click a row to open that song **as saved** — no engine is called and nothing is translated again. Press **Translate** if you do want a fresh translation.
-- Only songs with **every line translated** are saved. Stopped translations or songs with failed lines are not; once you fix the failed lines (Edit line), the song is saved.
+- A song is saved once **every line is translated**. A translation that stopped halfway (Stop, an error, closing the app) is saved after each finished stanza and marked **⏸**: open it and press **Continue / retranslate failed lines** to do only the remaining stanzas. Songs with failed lines are saved once you fix them (Edit line). ⏸ songs are left out of exports, **Select by language** and the offline copy.
 - Storage: one JSON file per song in the `history/` folder of the project (override with `LYRICS_HISTORY_DIR`). The same lyrics in the same target language overwrite the earlier file. You can open, back up or delete the files directly; **🗑 Delete the open song from history** removes the open one.
 - **When the app is off**: the open tab keeps a copy of every saved song (only changed songs are sent again). If the server stops, clicking a row still shows the song from that copy, with a notice to restart the app before editing or translating.
 
